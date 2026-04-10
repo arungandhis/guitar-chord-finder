@@ -74,31 +74,58 @@ export default function Home() {
     }
   };
 
-  const handleSelectVideo = async (video: VideoItem) => {
-    setSelectedVideo(video);
-    setChords(null);
-    setError('');
-    setChordLoading(true);
+  // Inside app/page.tsx, replace the handleSelectVideo function:
 
+const handleSelectVideo = async (video: VideoItem) => {
+  setSelectedVideo(video);
+  setChords(null);
+  setError('');
+  setChordLoading(true);
+
+  // 1. Check the static database first
+  const staticChords = getChordsForVideo(video.id.videoId, video.snippet.title);
+  if (staticChords) {
+    setChords(staticChords);
+    setChordLoading(false);
+    return;
+  }
+
+  // 2. If not found, try the Klangio API (if a key is set)
+  const klangioKey = localStorage.getItem('klangio_api_key');
+  if (klangioKey) {
     try {
-      // First, try to get chords from our static database
-      const staticChords = getChordsForVideo(video.id.videoId, video.snippet.title);
-      if (staticChords) {
-        setChords(staticChords);
-        setChordLoading(false);
-        return;
-      }
+      // Klangio API call
+      const response = await axios.post(
+        'https://api.klang.io/analyze/youtube',
+        { url: `https://www.youtube.com/watch?v=${video.id.videoId}` },
+        { headers: { 'X-API-Key': klangioKey } }
+      );
 
-      // If not in static database, try the Klangio API (or other service)
-      // For now, we'll show a helpful message
-      setError('Song not found in local database. You can add it, or set up a live API for better coverage.');
+      // Adapt Klangio's response to our app's format
+      const klangioData = response.data;
+      if (klangioData && klangioData.chords) {
+        const formattedChords = {
+          chords: klangioData.chords.map((chord: any) => ({
+            name: chord.chord,
+            timestamp: chord.start,
+          })),
+        };
+        setChords(formattedChords);
+      } else {
+        setError('No chords found for this video via Klangio.');
+      }
     } catch (err: any) {
-      console.error('Chord lookup error:', err);
-      setError('Failed to load chords. The song might not be in our database yet.');
+      console.error('Klangio API error:', err);
+      setError('Failed to fetch chords from Klangio. You may have reached the free tier limit.');
     } finally {
       setChordLoading(false);
     }
-  };
+  } else {
+    // No Klangio key, and not in static DB
+    setError('Song not found in local database. Add a Klangio API key in settings for live lookup.');
+    setChordLoading(false);
+  }
+};
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
