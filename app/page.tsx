@@ -38,8 +38,8 @@ export default function Home() {
 
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
-    const lm = localStorage.getItem('lamucal_api_key');
-    setHasKeys(!!yt && !!lm);
+    // No longer need Lamucal key
+    setHasKeys(!!yt);
   }, []);
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -67,29 +67,32 @@ export default function Home() {
   };
 
   const handleSelectVideo = async (video: VideoItem) => {
-    const lamucalKey = localStorage.getItem('lamucal_api_key');
-    if (!lamucalKey) {
-      setSettingsOpen(true);
-      return;
-    }
-
     setSelectedVideo(video);
     setChords(null);
     setError('');
     setChordLoading(true);
 
     try {
-      const url = `https://api.lamucal.com/v1/chords?youtube_id=${video.id.videoId}`;
-      const res = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${lamucalKey}`,
-        },
-      });
-      setChords(res.data);
+      // ChordMini public API (no key required)
+      const url = `https://api.chordmini.com/analyze?youtube_id=${video.id.videoId}`;
+      const res = await axios.get(url);
+
+      const chordMiniData = res.data;
+      if (chordMiniData && chordMiniData.chord_progression) {
+        const formattedChords = {
+          chords: chordMiniData.chord_progression.map((item: any) => ({
+            name: item.chord,
+            timestamp: item.start,
+          })),
+        };
+        setChords(formattedChords);
+      } else {
+        setError('Could not find chords for this video.');
+      }
     } catch (err: any) {
+      console.error(err);
       setError(
-        err.response?.data?.error ||
-          'Failed to load chords. The song might not be in the database yet.'
+        'Failed to load chords. The song might not be in the database yet.'
       );
     } finally {
       setChordLoading(false);
@@ -125,8 +128,7 @@ export default function Home() {
         {/* No Keys Warning */}
         {!hasKeys && (
           <div className="bg-yellow-600/20 border border-yellow-600 text-yellow-200 p-3 rounded-lg mb-4 text-sm">
-            ⚠️ API keys not set. Click the gear icon to add your YouTube and Lamucal
-            keys.
+            ⚠️ YouTube API key not set. Click the gear icon to add your key.
           </div>
         )}
 
