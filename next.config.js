@@ -1,8 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    appDir: true,
-  },
-}
+  output: 'export', // Enables static site generation for Render
+};
 
-module.exports = nextConfig
+module.exports = nextConfig;
