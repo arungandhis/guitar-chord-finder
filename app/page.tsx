@@ -9,6 +9,7 @@ import {
   Music,
   ChevronLeft,
   Settings as SettingsIcon,
+  AlertCircle,
 } from 'lucide-react';
 import Settings from './components/Settings';
 
@@ -38,7 +39,6 @@ export default function Home() {
 
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
-    // No longer need Lamucal key
     setHasKeys(!!yt);
   }, []);
 
@@ -52,15 +52,21 @@ export default function Home() {
 
     setLoading(true);
     setError('');
+    setVideos([]);
     try {
       const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=10&q=${encodeURIComponent(
         searchQuery
       )}&type=video&key=${youtubeKey}`;
       const res = await axios.get(url);
       setVideos(res.data.items || []);
-    } catch (err) {
-      setError('Search failed. Please check your API key and try again.');
-      console.error(err);
+      if (!res.data.items || res.data.items.length === 0) {
+        setError('No videos found. Try a different search.');
+      }
+    } catch (err: any) {
+      console.error('YouTube API error:', err);
+      const errorMessage =
+        err.response?.data?.error?.message || 'Search failed. Check your API key or try again later.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -73,7 +79,6 @@ export default function Home() {
     setChordLoading(true);
 
     try {
-      // ChordMini public API (no key required)
       const url = `https://api.chordmini.com/analyze?youtube_id=${video.id.videoId}`;
       const res = await axios.get(url);
 
@@ -87,13 +92,11 @@ export default function Home() {
         };
         setChords(formattedChords);
       } else {
-        setError('Could not find chords for this video.');
+        setError('No chords found for this video. It may not be analyzed yet.');
       }
     } catch (err: any) {
-      console.error(err);
-      setError(
-        'Failed to load chords. The song might not be in the database yet.'
-      );
+      console.error('Chord API error:', err);
+      setError('Failed to load chords. The service might be temporarily unavailable.');
     } finally {
       setChordLoading(false);
     }
@@ -160,6 +163,14 @@ export default function Home() {
           </div>
         </form>
 
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-600/20 border border-red-600 text-red-200 p-3 rounded-lg mb-4 text-sm flex items-start gap-2">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
+
         {/* Video Results Grid */}
         {videos.length > 0 && !selectedVideo && (
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
@@ -194,6 +205,7 @@ export default function Home() {
               onClick={() => {
                 setSelectedVideo(null);
                 setChords(null);
+                setError('');
               }}
               className="text-green-400 hover:underline flex items-center gap-1 text-sm"
             >
@@ -231,9 +243,14 @@ export default function Home() {
                   </div>
                 )}
 
-                {error && <p className="text-red-400 text-sm">{error}</p>}
+                {error && !chordLoading && (
+                  <div className="bg-red-600/20 border border-red-600 text-red-200 p-3 rounded-lg text-sm flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
 
-                {chords?.chords && (
+                {chords?.chords && !error && (
                   <div className="space-y-1 max-h-80 overflow-y-auto">
                     {chords.chords.map((chord, idx) => (
                       <div
