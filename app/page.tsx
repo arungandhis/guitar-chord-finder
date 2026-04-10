@@ -12,6 +12,8 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import Settings from './components/Settings';
+// We'll create this database file next
+import { getChordsForVideo } from './chordDatabase';
 
 interface VideoItem {
   id: { videoId: string };
@@ -79,24 +81,20 @@ export default function Home() {
     setChordLoading(true);
 
     try {
-      const url = `https://api.chordmini.com/analyze?youtube_id=${video.id.videoId}`;
-      const res = await axios.get(url);
-
-      const chordMiniData = res.data;
-      if (chordMiniData && chordMiniData.chord_progression) {
-        const formattedChords = {
-          chords: chordMiniData.chord_progression.map((item: any) => ({
-            name: item.chord,
-            timestamp: item.start,
-          })),
-        };
-        setChords(formattedChords);
-      } else {
-        setError('No chords found for this video. It may not be analyzed yet.');
+      // First, try to get chords from our static database
+      const staticChords = getChordsForVideo(video.id.videoId, video.snippet.title);
+      if (staticChords) {
+        setChords(staticChords);
+        setChordLoading(false);
+        return;
       }
+
+      // If not in static database, try the Klangio API (or other service)
+      // For now, we'll show a helpful message
+      setError('Song not found in local database. You can add it, or set up a live API for better coverage.');
     } catch (err: any) {
-      console.error('Chord API error:', err);
-      setError('Failed to load chords. The service might be temporarily unavailable.');
+      console.error('Chord lookup error:', err);
+      setError('Failed to load chords. The song might not be in our database yet.');
     } finally {
       setChordLoading(false);
     }
@@ -239,7 +237,7 @@ export default function Home() {
                 {chordLoading && (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="animate-spin w-6 h-6 text-green-400" />
-                    <span className="ml-2">Analyzing...</span>
+                    <span className="ml-2">Looking up chords...</span>
                   </div>
                 )}
 
