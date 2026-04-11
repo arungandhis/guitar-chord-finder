@@ -13,6 +13,9 @@ import {
 } from 'lucide-react';
 import Settings from './components/Settings';
 
+// Simple static chord database fallback
+import { getStaticChords } from './staticChords';
+
 interface VideoItem {
   id: { videoId: string };
   snippet: {
@@ -73,6 +76,64 @@ export default function Home() {
     }
   };
 
+  const fetchSongsterrChords = async (videoTitle: string, artist: string) => {
+    // Use a public CORS proxy to bypass browser restrictions
+    const proxy = 'https://corsproxy.io/?';
+    
+    // Step 1: Search for song
+    const searchUrl = `${proxy}${encodeURIComponent(
+      `https://www.songsterr.com/a/wa/bestMatchForQueryStringPart?s=${encodeURIComponent(videoTitle)}`
+    )}`;
+    
+    try {
+      const searchRes = await axios.get(searchUrl);
+      const songData = searchRes.data;
+      
+      if (!songData || !songData.id) {
+        // Try artist search
+        const artistSearchUrl = `${proxy}${encodeURIComponent(
+          `https://www.songsterr.com/a/ra/songs/byartists.json?artists=${encodeURIComponent(artist)}`
+        )}`;
+        const artistRes = await axios.get(artistSearchUrl);
+        if (artistRes.data && artistRes.data.length > 0) {
+          const firstSong = artistRes.data[0];
+          const tabUrl = `${proxy}${encodeURIComponent(
+            `https://www.songsterr.com/a/wa/view?r=${firstSong.id}`
+          )}`;
+          const tabRes = await axios.get(tabUrl, {
+            headers: { Accept: 'application/json' },
+          });
+          return extractChordsFromTab(tabRes.data);
+        }
+        return null;
+      }
+      
+      // Step 2: Get tab data
+      const tabUrl = `${proxy}${encodeURIComponent(
+        `https://www.songsterr.com/a/wa/view?r=${songData.id}`
+      )}`;
+      const tabRes = await axios.get(tabUrl, {
+        headers: { Accept: 'application/json' },
+      });
+      return extractChordsFromTab(tabRes.data);
+    } catch (err) {
+      console.error('Songsterr proxy error:', err);
+      return null;
+    }
+  };
+
+  const extractChordsFromTab = (tabData: any): ChordData | null => {
+    if (tabData && tabData.chords && tabData.chords.length > 0) {
+      return {
+        chords: tabData.chords.map((chord: any) => ({
+          name: chord.chordName,
+          timestamp: chord.time,
+        })),
+      };
+    }
+    return null;
+  };
+
   const handleSelectVideo = async (video: VideoItem) => {
     setSelectedVideo(video);
     setChords(null);
@@ -80,69 +141,31 @@ export default function Home() {
     setChordLoading(true);
 
     try {
-      // Step 1: Get the best match from Songsterr using the video title
-      const searchUrl = `https://www.songsterr.com/a/wa/bestMatchForQueryStringPart?s=${encodeURIComponent(
-        video.snippet.title
-      )}`;
-      const searchRes = await axios.get(searchUrl);
-      const songData = searchRes.data;
-
-      if (!songData || !songData.id) {
-        // Fallback: Try searching by artist
-        const artistName = video.snippet.channelTitle;
-        const fallbackUrl = `https://www.songsterr.com/a/ra/songs/byartists.json?artists=${encodeURIComponent(artistName)}`;
-        const fallbackRes = await axios.get(fallbackUrl);
-        if (fallbackRes.data && fallbackRes.data.length > 0) {
-          // Use the first song by that artist
-          const firstSong = fallbackRes.data[0];
-          const tabUrl = `https://www.songsterr.com/a/wa/view?r=${firstSong.id}`;
-          const tabRes = await axios.get(tabUrl, {
-            headers: { Accept: 'application/json' },
-          });
-          const tabData = tabRes.data;
-          if (tabData && tabData.chords) {
-            const formattedChords = {
-              chords: tabData.chords.map((chord: any) => ({
-                name: chord.chordName,
-                timestamp: chord.time,
-              })),
-            };
-            setChords(formattedChords);
-            setChordLoading(false);
-            return;
-          }
-        }
-        setError('Song not found on Songsterr.');
+      // 1. Try Songsterr with CORS proxy
+      const songsterrChords = await fetchSongsterrChords(
+        video.snippet.title,
+        video.snippet.channelTitle
+      );
+      
+      if (songsterrChords) {
+        setChords(songsterrChords);
         setChordLoading(false);
         return;
       }
 
-      // Step 2: Fetch the tab data using the correct endpoint
-      const tabUrl = `https://www.songsterr.com/a/wa/view?r=${songData.id}`;
-      const tabRes = await axios.get(tabUrl, {
-        headers: { Accept: 'application/json' },
-      });
-      const tabData = tabRes.data;
+      // 2. Fallback to static database
+      const staticChords = getStaticChords(video.snippet.title);
+      if (staticChords) {
+        setChords(staticChords);
+        setChordLoading(false);
+        return;
+      }
 
-      // Step 3: Extract chord progression from tab JSON
-      if (tabData && tabData.chords && tabData.chords.length > 0) {
-        const formattedChords = {
-          chords: tabData.chords.map((chord: any) => ({
-            name: chord.chordName,
-            timestamp: chord.time,
-          })),
-        };
-        setChords(formattedChords);
-      } else {
-        setError('No chord data available for this song on Songsterr.');
-      }
+      // 3. Nothing worked
+      setError('Chords not found. Try a more popular song or check back later.');
     } catch (err: any) {
-      console.error('Songsterr API error:', err);
-      if (err.message?.includes('CORS')) {
-        setError('CORS error: Unable to fetch from Songsterr. Try using a CORS proxy.');
-      } else {
-        setError('Failed to load chords from Songsterr. Please try again later.');
-      }
+      console.error('Unexpected error:', err);
+      setError('Something went wrong. Please try again.');
     } finally {
       setChordLoading(false);
     }
@@ -162,7 +185,7 @@ export default function Home() {
             <Music className="w-7 h-7 text-green-400" />
             Chord Finder
           </h1>
-          <p className="text-gray-400 text-sm">YouTube → Chords (via Songsterr)</p>
+          <p className="text-gray-400 text-sm">YouTube → Chords (Songsterr + Static DB)</p>
         </header>
 
         {/* Settings Button */}
@@ -285,7 +308,7 @@ export default function Home() {
                 {chordLoading && (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="animate-spin w-6 h-6 text-green-400" />
-                    <span className="ml-2">Fetching from Songsterr...</span>
+                    <span className="ml-2">Fetching chords...</span>
                   </div>
                 )}
 
