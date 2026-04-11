@@ -4,20 +4,14 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import YouTube from 'react-youtube';
 import {
-  Search,
-  Loader2,
-  Music,
-  ChevronLeft,
-  Settings as SettingsIcon,
-  AlertCircle,
-  Plus,
-  Save,
-  X,
-  List,
-  Guitar,
+  Search, Loader2, Music, ChevronLeft, Settings as SettingsIcon,
+  AlertCircle, Plus, Save, X, List, Guitar, Star,
 } from 'lucide-react';
 import Settings from './components/Settings';
-import { findSongByTitle, getAllSongs, SongData, ChordEntry, MelodyNote } from './staticChords';
+import {
+  findSongByTitle, getAllSongs, SongData, ChordEntry, MelodyNote,
+  toggleFavorite, isFavorite, getFavoriteSongs,
+} from './staticChords';
 
 interface VideoItem {
   id: { videoId: string };
@@ -42,13 +36,23 @@ export default function Home() {
   const [manualChords, setManualChords] = useState<ChordEntry[]>([{ name: '', timestamp: 0 }]);
   const [manualMelody, setManualMelody] = useState<MelodyNote[]>([{ string: 1, fret: 0, timestamp: 0 }]);
   const [browseOpen, setBrowseOpen] = useState(false);
-  const [availableSongs] = useState(() => getAllSongs());
+  const [browseTab, setBrowseTab] = useState<'all' | 'favorites'>('all');
+  const [allSongs] = useState(() => getAllSongs());
+  const [favorites, setFavorites] = useState<SongData[]>([]);
   const [activeTab, setActiveTab] = useState<'chords' | 'melody'>('chords');
 
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
     setHasKeys(!!yt);
+    setFavorites(getFavoriteSongs());
   }, []);
+
+  const refreshFavorites = () => setFavorites(getFavoriteSongs());
+
+  const handleToggleFavorite = (songId: string) => {
+    toggleFavorite(songId);
+    refreshFavorites();
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,6 +117,7 @@ export default function Home() {
     setChordLoading(false);
   };
 
+  // Manual entry functions (unchanged)
   const addManualChordRow = () => setManualChords([...manualChords, { name: '', timestamp: 0 }]);
   const updateManualChord = (index: number, field: 'name' | 'timestamp', value: string | number) => {
     const updated = [...manualChords];
@@ -121,7 +126,6 @@ export default function Home() {
     setManualChords(updated);
   };
   const removeManualChord = (index: number) => setManualChords(manualChords.filter((_, i) => i !== index));
-
   const addManualMelodyRow = () => setManualMelody([...manualMelody, { string: 1, fret: 0, timestamp: 0 }]);
   const updateManualMelody = (index: number, field: 'string' | 'fret' | 'timestamp', value: number) => {
     const updated = [...manualMelody];
@@ -129,7 +133,6 @@ export default function Home() {
     setManualMelody(updated);
   };
   const removeManualMelody = (index: number) => setManualMelody(manualMelody.filter((_, i) => i !== index));
-
   const saveManualData = () => {
     const validChords = manualChords.filter(c => c.name.trim() !== '');
     const validMelody = manualMelody.filter(m => m.timestamp !== undefined);
@@ -158,6 +161,8 @@ export default function Home() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const songsToShow = browseTab === 'all' ? allSongs : favorites;
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-3 md:p-8">
       <div className="max-w-6xl mx-auto relative">
@@ -171,7 +176,7 @@ export default function Home() {
 
         <div className="absolute top-0 right-0 flex gap-2">
           <button
-            onClick={() => setBrowseOpen(true)}
+            onClick={() => { setBrowseOpen(true); refreshFavorites(); }}
             className="p-2 bg-gray-800 rounded-full hover:bg-gray-700"
             aria-label="Browse songs"
           >
@@ -401,7 +406,9 @@ export default function Home() {
                             </div>
                           ))
                         ) : (
-                          <p className="text-gray-400 text-center py-4">No melody notes available for this song.</p>
+                          <p className="text-gray-400 text-center py-4">
+                            No melody notes available for this song. You can add them manually.
+                          </p>
                         )}
                       </div>
                     )}
@@ -412,26 +419,55 @@ export default function Home() {
           </div>
         )}
 
+        {/* Browse Modal with Favorites */}
         {browseOpen && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
             <div className="bg-gray-800 rounded-lg w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
               <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-                <h2 className="text-xl font-bold">🎸 Bollywood Songs (100+)</h2>
+                <h2 className="text-xl font-bold">🎸 Bollywood Songs</h2>
                 <button onClick={() => setBrowseOpen(false)} className="p-1 hover:bg-gray-700 rounded">
                   <X className="w-5 h-5" />
                 </button>
               </div>
+              <div className="flex border-b border-gray-700">
+                <button
+                  onClick={() => setBrowseTab('all')}
+                  className={`flex-1 py-2 font-medium ${browseTab === 'all' ? 'text-green-400 border-b-2 border-green-400' : 'text-gray-400'}`}
+                >
+                  All Songs ({allSongs.length})
+                </button>
+                <button
+                  onClick={() => setBrowseTab('favorites')}
+                  className={`flex-1 py-2 font-medium ${browseTab === 'favorites' ? 'text-green-400 border-b-2 border-green-400' : 'text-gray-400'}`}
+                >
+                  Favorites ({favorites.length})
+                </button>
+              </div>
               <div className="overflow-y-auto p-4 grid grid-cols-1 md:grid-cols-2 gap-2">
-                {availableSongs.map((song) => (
-                  <button
-                    key={song.id}
-                    onClick={() => handleSelectSong(song)}
-                    className="text-left p-3 bg-gray-700 hover:bg-gray-600 rounded-lg transition"
-                  >
-                    <div className="font-medium">{song.title}</div>
-                    <div className="text-xs text-gray-400">{song.artist} • {song.year}</div>
-                  </button>
+                {songsToShow.map((song) => (
+                  <div key={song.id} className="bg-gray-700 hover:bg-gray-600 rounded-lg transition">
+                    <button
+                      onClick={() => handleSelectSong(song)}
+                      className="text-left p-3 w-full"
+                    >
+                      <div className="font-medium">{song.title}</div>
+                      <div className="text-xs text-gray-400">{song.artist} • {song.year}</div>
+                    </button>
+                    <div className="px-3 pb-2 flex justify-end">
+                      <button
+                        onClick={() => handleToggleFavorite(song.id)}
+                        className="text-yellow-400 hover:text-yellow-300"
+                      >
+                        <Star className={`w-4 h-4 ${isFavorite(song.id) ? 'fill-current' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
                 ))}
+                {songsToShow.length === 0 && (
+                  <p className="col-span-2 text-center text-gray-400 py-8">
+                    {browseTab === 'favorites' ? 'No favorites yet. Star songs to add them here!' : 'No songs found.'}
+                  </p>
+                )}
               </div>
               <div className="p-4 border-t border-gray-700">
                 <button onClick={() => setBrowseOpen(false)} className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 rounded">
