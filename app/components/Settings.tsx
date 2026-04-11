@@ -64,7 +64,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             </a>
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            Chord detection is powered by ChordMini (free, no key required).
+            Chord data is provided by Songsterr (free, no key required).
           </p>
         </div>
 
