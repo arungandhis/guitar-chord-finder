@@ -10,18 +10,15 @@ interface SettingsProps {
 
 export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [youtubeKey, setYoutubeKey] = useState('');
-  const [klangioKey, setKlangioKey] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       setYoutubeKey(localStorage.getItem('youtube_api_key') || '');
-      setKlangioKey(localStorage.getItem('klangio_api_key') || '');
     }
   }, [isOpen]);
 
   const saveSettings = () => {
     localStorage.setItem('youtube_api_key', youtubeKey.trim());
-    localStorage.setItem('klangio_api_key', klangioKey.trim());
     onClose();
     window.location.reload();
   };
@@ -42,7 +39,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
         </div>
 
         <p className="text-sm text-gray-400 mb-4">
-          Enter your API keys. They are stored only in your browser.
+          Enter your YouTube API key. It is stored only in your browser.
         </p>
 
         <div className="space-y-4">
@@ -66,26 +63,9 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               Get a YouTube API key →
             </a>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Klangio API Key (Optional)
-            </label>
-            <input
-              type="password"
-              value={klangioKey}
-              onChange={(e) => setKlangioKey(e.target.value)}
-              placeholder="kla_..."
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
-            />
-            <a
-              href="https://klang.io/api/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-green-400 mt-1 inline-block"
-            >
-              Get a Klangio API key (Free tier available) →
-            </a>
-          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Chord detection is powered by ChordMini (free, no key required).
+          </p>
         </div>
 
         <div className="flex justify-end gap-2 mt-6">
