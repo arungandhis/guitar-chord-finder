@@ -12,8 +12,6 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import Settings from './components/Settings';
-// We'll create this database file next
-import { getChordsForVideo } from './chordDatabase';
 
 interface VideoItem {
   id: { videoId: string };
@@ -67,65 +65,44 @@ export default function Home() {
     } catch (err: any) {
       console.error('YouTube API error:', err);
       const errorMessage =
-        err.response?.data?.error?.message || 'Search failed. Check your API key or try again later.';
+        err.response?.data?.error?.message ||
+        'Search failed. Check your API key or try again later.';
       setError(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  // Inside app/page.tsx, replace the handleSelectVideo function:
+  const handleSelectVideo = async (video: VideoItem) => {
+    setSelectedVideo(video);
+    setChords(null);
+    setError('');
+    setChordLoading(true);
 
-const handleSelectVideo = async (video: VideoItem) => {
-  setSelectedVideo(video);
-  setChords(null);
-  setError('');
-  setChordLoading(true);
-
-  // 1. Check the static database first
-  const staticChords = getChordsForVideo(video.id.videoId, video.snippet.title);
-  if (staticChords) {
-    setChords(staticChords);
-    setChordLoading(false);
-    return;
-  }
-
-  // 2. If not found, try the Klangio API (if a key is set)
-  const klangioKey = localStorage.getItem('klangio_api_key');
-  if (klangioKey) {
     try {
-      // Klangio API call
-      const response = await axios.post(
-        'https://api.klang.io/analyze/youtube',
-        { url: `https://www.youtube.com/watch?v=${video.id.videoId}` },
-        { headers: { 'X-API-Key': klangioKey } }
-      );
+      // Use ChordMini public API (no key required)
+      const url = `https://api.chordmini.com/analyze?youtube_id=${video.id.videoId}`;
+      const res = await axios.get(url);
 
-      // Adapt Klangio's response to our app's format
-      const klangioData = response.data;
-      if (klangioData && klangioData.chords) {
+      const chordMiniData = res.data;
+      if (chordMiniData && chordMiniData.chord_progression) {
         const formattedChords = {
-          chords: klangioData.chords.map((chord: any) => ({
-            name: chord.chord,
-            timestamp: chord.start,
+          chords: chordMiniData.chord_progression.map((item: any) => ({
+            name: item.chord,
+            timestamp: item.start,
           })),
         };
         setChords(formattedChords);
       } else {
-        setError('No chords found for this video via Klangio.');
+        setError('No chords found for this video. It may not be in ChordMini yet.');
       }
     } catch (err: any) {
-      console.error('Klangio API error:', err);
-      setError('Failed to fetch chords from Klangio. You may have reached the free tier limit.');
+      console.error('Chord API error:', err);
+      setError('Failed to load chords. The ChordMini service might be temporarily unavailable.');
     } finally {
       setChordLoading(false);
     }
-  } else {
-    // No Klangio key, and not in static DB
-    setError('Song not found in local database. Add a Klangio API key in settings for live lookup.');
-    setChordLoading(false);
-  }
-};
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -264,7 +241,7 @@ const handleSelectVideo = async (video: VideoItem) => {
                 {chordLoading && (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="animate-spin w-6 h-6 text-green-400" />
-                    <span className="ml-2">Looking up chords...</span>
+                    <span className="ml-2">Analyzing with ChordMini...</span>
                   </div>
                 )}
 
