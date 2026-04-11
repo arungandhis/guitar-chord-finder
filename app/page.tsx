@@ -17,7 +17,7 @@ import {
   Guitar,
 } from 'lucide-react';
 import Settings from './components/Settings';
-import { getStaticChords, getAllStaticSongs, ChordEntry, MelodyNote } from './staticChords';
+import { findSongByTitle, getAllSongs, SongData, ChordEntry, MelodyNote } from './staticChords';
 
 interface VideoItem {
   id: { videoId: string };
@@ -26,11 +26,6 @@ interface VideoItem {
     thumbnails: { medium: { url: string } };
     channelTitle: string;
   };
-}
-
-interface SongData {
-  chords: ChordEntry[];
-  melody?: MelodyNote[];
 }
 
 export default function Home() {
@@ -47,7 +42,7 @@ export default function Home() {
   const [manualChords, setManualChords] = useState<ChordEntry[]>([{ name: '', timestamp: 0 }]);
   const [manualMelody, setManualMelody] = useState<MelodyNote[]>([{ string: 1, fret: 0, timestamp: 0 }]);
   const [browseOpen, setBrowseOpen] = useState(false);
-  const [availableSongs] = useState(() => getAllStaticSongs());
+  const [availableSongs] = useState(() => getAllSongs());
   const [activeTab, setActiveTab] = useState<'chords' | 'melody'>('chords');
 
   useEffect(() => {
@@ -86,55 +81,54 @@ export default function Home() {
     }
   };
 
+  const handleSelectSong = (song: SongData) => {
+    setBrowseOpen(false);
+    setSelectedVideo({
+      id: { videoId: song.videoId },
+      snippet: {
+        title: `${song.title} - ${song.artist}`,
+        thumbnails: { medium: { url: `https://img.youtube.com/vi/${song.videoId}/mqdefault.jpg` } },
+        channelTitle: song.artist,
+      },
+    });
+    setSongData(song);
+    setError('');
+    setManualMode(false);
+    setActiveTab('chords');
+  };
+
   const handleSelectVideo = async (video: VideoItem) => {
     setSelectedVideo(video);
-    setSongData(null);
-    setError('');
     setChordLoading(true);
     setManualMode(false);
-
-    const staticResult = getStaticChords(video.snippet.title);
-    if (staticResult) {
-      setSongData(staticResult);
-      setChordLoading(false);
-      return;
+    setSongData(null);
+    const found = findSongByTitle(video.snippet.title);
+    if (found) {
+      setSongData(found);
+      setError('');
+    } else {
+      setSongData(null);
+      setError('Song not in Bollywood database. You can add chords manually below.');
     }
-
     setChordLoading(false);
-    setError('Song not found in database. You can enter chords and melody manually below.');
   };
 
-  const addManualChordRow = () => {
-    setManualChords([...manualChords, { name: '', timestamp: 0 }]);
-  };
-
+  const addManualChordRow = () => setManualChords([...manualChords, { name: '', timestamp: 0 }]);
   const updateManualChord = (index: number, field: 'name' | 'timestamp', value: string | number) => {
     const updated = [...manualChords];
-    if (field === 'name') {
-      updated[index].name = value as string;
-    } else {
-      updated[index].timestamp = Number(value);
-    }
+    if (field === 'name') updated[index].name = value as string;
+    else updated[index].timestamp = Number(value);
     setManualChords(updated);
   };
+  const removeManualChord = (index: number) => setManualChords(manualChords.filter((_, i) => i !== index));
 
-  const removeManualChord = (index: number) => {
-    setManualChords(manualChords.filter((_, i) => i !== index));
-  };
-
-  const addManualMelodyRow = () => {
-    setManualMelody([...manualMelody, { string: 1, fret: 0, timestamp: 0 }]);
-  };
-
+  const addManualMelodyRow = () => setManualMelody([...manualMelody, { string: 1, fret: 0, timestamp: 0 }]);
   const updateManualMelody = (index: number, field: 'string' | 'fret' | 'timestamp', value: number) => {
     const updated = [...manualMelody];
     updated[index][field] = value;
     setManualMelody(updated);
   };
-
-  const removeManualMelody = (index: number) => {
-    setManualMelody(manualMelody.filter((_, i) => i !== index));
-  };
+  const removeManualMelody = (index: number) => setManualMelody(manualMelody.filter((_, i) => i !== index));
 
   const saveManualData = () => {
     const validChords = manualChords.filter(c => c.name.trim() !== '');
@@ -143,7 +137,17 @@ export default function Home() {
       setError('Please enter at least one chord or melody note.');
       return;
     }
-    setSongData({ chords: validChords, melody: validMelody });
+    setSongData({
+      id: 'manual',
+      title: selectedVideo?.snippet.title || 'Manual Entry',
+      artist: 'Unknown',
+      year: new Date().getFullYear(),
+      videoId: selectedVideo?.id.videoId || '',
+      keywords: [],
+      displayName: 'Manual Entry',
+      chords: validChords,
+      melody: validMelody,
+    });
     setManualMode(false);
     setError('');
   };
@@ -154,20 +158,15 @@ export default function Home() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const renderMelodyNote = (note: MelodyNote) => {
-    const strings = ['E', 'B', 'G', 'D', 'A', 'E'];
-    return `${strings[note.string - 1]}${note.fret}`;
-  };
-
   return (
     <main className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-3 md:p-8">
       <div className="max-w-6xl mx-auto relative">
         <header className="text-center mb-6">
           <h1 className="text-3xl md:text-5xl font-bold mb-1 flex items-center justify-center gap-2">
             <Music className="w-7 h-7 text-green-400" />
-            Chord & Tab Finder
+            Bollywood Chord & Tab Finder
           </h1>
-          <p className="text-gray-400 text-sm">YouTube → Chords + Melody Notes</p>
+          <p className="text-gray-400 text-sm">100+ Songs (1960–2025) • Click Browse or Search YouTube</p>
         </header>
 
         <div className="absolute top-0 right-0 flex gap-2">
@@ -193,16 +192,13 @@ export default function Home() {
           </div>
         )}
 
-        <form
-          onSubmit={handleSearch}
-          className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur p-2 -mx-2 mb-4"
-        >
+        <form onSubmit={handleSearch} className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur p-2 -mx-2 mb-4">
           <div className="flex gap-2">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Song name or artist..."
+              placeholder="Search any YouTube video..."
               className="flex-1 px-4 py-3 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500 text-base"
             />
             <button
@@ -270,7 +266,6 @@ export default function Home() {
               <h2 className="text-lg font-bold px-1">{selectedVideo.snippet.title}</h2>
 
               <div className="bg-gray-800 rounded-lg p-4">
-                {/* Tab switcher */}
                 <div className="flex gap-2 mb-4 border-b border-gray-700">
                   <button
                     onClick={() => setActiveTab('chords')}
@@ -309,7 +304,6 @@ export default function Home() {
 
                 {manualMode && (
                   <div className="space-y-6">
-                    {/* Manual Chords Section */}
                     <div>
                       <h4 className="font-medium mb-2">Chords</h4>
                       {manualChords.map((chord, idx) => (
@@ -340,7 +334,6 @@ export default function Home() {
                       </button>
                     </div>
 
-                    {/* Manual Melody Section */}
                     <div>
                       <h4 className="font-medium mb-2">Melody Notes (String, Fret, Time)</h4>
                       {manualMelody.map((note, idx) => (
@@ -419,28 +412,29 @@ export default function Home() {
           </div>
         )}
 
-        {/* Browse Songs Modal */}
         {browseOpen && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-lg w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="bg-gray-800 rounded-lg w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
               <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-                <h2 className="text-xl font-bold">Available Songs</h2>
+                <h2 className="text-xl font-bold">🎸 Bollywood Songs (100+)</h2>
                 <button onClick={() => setBrowseOpen(false)} className="p-1 hover:bg-gray-700 rounded">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="overflow-y-auto p-4 space-y-1">
-                {availableSongs.map((song, idx) => (
-                  <div key={idx} className="p-2 bg-gray-700 rounded text-sm">
-                    {song.displayName}
-                  </div>
+              <div className="overflow-y-auto p-4 grid grid-cols-1 md:grid-cols-2 gap-2">
+                {availableSongs.map((song) => (
+                  <button
+                    key={song.id}
+                    onClick={() => handleSelectSong(song)}
+                    className="text-left p-3 bg-gray-700 hover:bg-gray-600 rounded-lg transition"
+                  >
+                    <div className="font-medium">{song.title}</div>
+                    <div className="text-xs text-gray-400">{song.artist} • {song.year}</div>
+                  </button>
                 ))}
               </div>
               <div className="p-4 border-t border-gray-700">
-                <button
-                  onClick={() => setBrowseOpen(false)}
-                  className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 rounded"
-                >
+                <button onClick={() => setBrowseOpen(false)} className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 rounded">
                   Close
                 </button>
               </div>
