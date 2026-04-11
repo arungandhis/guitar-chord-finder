@@ -10,11 +10,12 @@ import {
   ChevronLeft,
   Settings as SettingsIcon,
   AlertCircle,
+  Plus,
+  Save,
+  X,
 } from 'lucide-react';
 import Settings from './components/Settings';
-
-// Simple static chord database fallback
-import { getStaticChords } from './staticChords';
+import { getStaticChords, ChordEntry } from './staticChords';
 
 interface VideoItem {
   id: { videoId: string };
@@ -26,7 +27,7 @@ interface VideoItem {
 }
 
 interface ChordData {
-  chords: { name: string; timestamp: number }[];
+  chords: ChordEntry[];
 }
 
 export default function Home() {
@@ -39,6 +40,10 @@ export default function Home() {
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hasKeys, setHasKeys] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualChords, setManualChords] = useState<ChordEntry[]>([
+    { name: '', timestamp: 0 },
+  ]);
 
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
@@ -76,99 +81,53 @@ export default function Home() {
     }
   };
 
-  const fetchSongsterrChords = async (videoTitle: string, artist: string) => {
-    // Use a public CORS proxy to bypass browser restrictions
-    const proxy = 'https://corsproxy.io/?';
-    
-    // Step 1: Search for song
-    const searchUrl = `${proxy}${encodeURIComponent(
-      `https://www.songsterr.com/a/wa/bestMatchForQueryStringPart?s=${encodeURIComponent(videoTitle)}`
-    )}`;
-    
-    try {
-      const searchRes = await axios.get(searchUrl);
-      const songData = searchRes.data;
-      
-      if (!songData || !songData.id) {
-        // Try artist search
-        const artistSearchUrl = `${proxy}${encodeURIComponent(
-          `https://www.songsterr.com/a/ra/songs/byartists.json?artists=${encodeURIComponent(artist)}`
-        )}`;
-        const artistRes = await axios.get(artistSearchUrl);
-        if (artistRes.data && artistRes.data.length > 0) {
-          const firstSong = artistRes.data[0];
-          const tabUrl = `${proxy}${encodeURIComponent(
-            `https://www.songsterr.com/a/wa/view?r=${firstSong.id}`
-          )}`;
-          const tabRes = await axios.get(tabUrl, {
-            headers: { Accept: 'application/json' },
-          });
-          return extractChordsFromTab(tabRes.data);
-        }
-        return null;
-      }
-      
-      // Step 2: Get tab data
-      const tabUrl = `${proxy}${encodeURIComponent(
-        `https://www.songsterr.com/a/wa/view?r=${songData.id}`
-      )}`;
-      const tabRes = await axios.get(tabUrl, {
-        headers: { Accept: 'application/json' },
-      });
-      return extractChordsFromTab(tabRes.data);
-    } catch (err) {
-      console.error('Songsterr proxy error:', err);
-      return null;
-    }
-  };
-
-  const extractChordsFromTab = (tabData: any): ChordData | null => {
-    if (tabData && tabData.chords && tabData.chords.length > 0) {
-      return {
-        chords: tabData.chords.map((chord: any) => ({
-          name: chord.chordName,
-          timestamp: chord.time,
-        })),
-      };
-    }
-    return null;
-  };
-
   const handleSelectVideo = async (video: VideoItem) => {
     setSelectedVideo(video);
     setChords(null);
     setError('');
     setChordLoading(true);
+    setManualMode(false);
 
-    try {
-      // 1. Try Songsterr with CORS proxy
-      const songsterrChords = await fetchSongsterrChords(
-        video.snippet.title,
-        video.snippet.channelTitle
-      );
-      
-      if (songsterrChords) {
-        setChords(songsterrChords);
-        setChordLoading(false);
-        return;
-      }
-
-      // 2. Fallback to static database
-      const staticChords = getStaticChords(video.snippet.title);
-      if (staticChords) {
-        setChords(staticChords);
-        setChordLoading(false);
-        return;
-      }
-
-      // 3. Nothing worked
-      setError('Chords not found. Try a more popular song or check back later.');
-    } catch (err: any) {
-      console.error('Unexpected error:', err);
-      setError('Something went wrong. Please try again.');
-    } finally {
+    // Check static database
+    const staticResult = getStaticChords(video.snippet.title);
+    if (staticResult) {
+      setChords(staticResult);
       setChordLoading(false);
+      return;
     }
+
+    // Not found – offer manual entry
+    setChordLoading(false);
+    setError('Song not found in database. You can enter chords manually below.');
+  };
+
+  const addManualChordRow = () => {
+    setManualChords([...manualChords, { name: '', timestamp: 0 }]);
+  };
+
+  const updateManualChord = (index: number, field: 'name' | 'timestamp', value: string | number) => {
+    const updated = [...manualChords];
+    if (field === 'name') {
+      updated[index].name = value as string;
+    } else {
+      updated[index].timestamp = Number(value);
+    }
+    setManualChords(updated);
+  };
+
+  const removeManualChord = (index: number) => {
+    setManualChords(manualChords.filter((_, i) => i !== index));
+  };
+
+  const saveManualChords = () => {
+    const validChords = manualChords.filter(c => c.name.trim() !== '');
+    if (validChords.length === 0) {
+      setError('Please enter at least one chord.');
+      return;
+    }
+    setChords({ chords: validChords });
+    setManualMode(false);
+    setError('');
   };
 
   const formatTime = (seconds: number) => {
@@ -185,10 +144,9 @@ export default function Home() {
             <Music className="w-7 h-7 text-green-400" />
             Chord Finder
           </h1>
-          <p className="text-gray-400 text-sm">YouTube → Chords (Songsterr + Static DB)</p>
+          <p className="text-gray-400 text-sm">YouTube → Chords (Static DB + Manual)</p>
         </header>
 
-        {/* Settings Button */}
         <button
           onClick={() => setSettingsOpen(true)}
           className="absolute top-0 right-0 p-2 bg-gray-800 rounded-full hover:bg-gray-700"
@@ -197,14 +155,12 @@ export default function Home() {
           <SettingsIcon className="w-5 h-5" />
         </button>
 
-        {/* No Keys Warning */}
         {!hasKeys && (
           <div className="bg-yellow-600/20 border border-yellow-600 text-yellow-200 p-3 rounded-lg mb-4 text-sm">
             ⚠️ YouTube API key not set. Click the gear icon to add your key.
           </div>
         )}
 
-        {/* Search Form */}
         <form
           onSubmit={handleSearch}
           className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur p-2 -mx-2 mb-4"
@@ -222,17 +178,12 @@ export default function Home() {
               disabled={loading}
               className="px-5 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-medium flex items-center gap-1 disabled:opacity-50"
             >
-              {loading ? (
-                <Loader2 className="animate-spin w-5 h-5" />
-              ) : (
-                <Search className="w-5 h-5" />
-              )}
+              {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <Search className="w-5 h-5" />}
               <span className="hidden sm:inline">Search</span>
             </button>
           </div>
         </form>
 
-        {/* Error Display */}
         {error && (
           <div className="bg-red-600/20 border border-red-600 text-red-200 p-3 rounded-lg mb-4 text-sm flex items-start gap-2">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -240,7 +191,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Video Results Grid */}
         {videos.length > 0 && !selectedVideo && (
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             {videos.map((video) => (
@@ -255,19 +205,14 @@ export default function Home() {
                   className="w-full aspect-video object-cover"
                 />
                 <div className="p-2">
-                  <h3 className="font-medium text-sm line-clamp-2">
-                    {video.snippet.title}
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-1 truncate">
-                    {video.snippet.channelTitle}
-                  </p>
+                  <h3 className="font-medium text-sm line-clamp-2">{video.snippet.title}</h3>
+                  <p className="text-xs text-gray-400 mt-1 truncate">{video.snippet.channelTitle}</p>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Selected Video View */}
         {selectedVideo && (
           <div className="space-y-4">
             <button
@@ -275,6 +220,7 @@ export default function Home() {
                 setSelectedVideo(null);
                 setChords(null);
                 setError('');
+                setManualMode(false);
               }}
               className="text-green-400 hover:underline flex items-center gap-1 text-sm"
             >
@@ -282,23 +228,15 @@ export default function Home() {
             </button>
 
             <div className="space-y-4">
-              {/* YouTube Player */}
               <div className="rounded-lg overflow-hidden">
                 <YouTube
                   videoId={selectedVideo.id.videoId}
-                  opts={{
-                    width: '100%',
-                    height: '100%',
-                    playerVars: { autoplay: 0 },
-                  }}
+                  opts={{ width: '100%', height: '100%', playerVars: { autoplay: 0 } }}
                   className="aspect-video"
                 />
               </div>
-              <h2 className="text-lg font-bold px-1">
-                {selectedVideo.snippet.title}
-              </h2>
+              <h2 className="text-lg font-bold px-1">{selectedVideo.snippet.title}</h2>
 
-              {/* Chords Panel */}
               <div className="bg-gray-800 rounded-lg p-4">
                 <h3 className="text-xl font-bold mb-3 flex items-center gap-2">
                   <Music className="w-5 h-5 text-green-400" />
@@ -308,30 +246,79 @@ export default function Home() {
                 {chordLoading && (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="animate-spin w-6 h-6 text-green-400" />
-                    <span className="ml-2">Fetching chords...</span>
+                    <span className="ml-2">Looking up chords...</span>
                   </div>
                 )}
 
-                {error && !chordLoading && (
-                  <div className="bg-red-600/20 border border-red-600 text-red-200 p-3 rounded-lg text-sm flex items-start gap-2">
-                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                    <span>{error}</span>
+                {!chordLoading && !chords && !manualMode && (
+                  <div className="space-y-4">
+                    <p className="text-gray-400 text-sm">
+                      This song isn't in our database yet. Would you like to enter chords manually?
+                    </p>
+                    <button
+                      onClick={() => setManualMode(true)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" /> Add Chords Manually
+                    </button>
                   </div>
                 )}
 
-                {chords?.chords && !error && (
+                {manualMode && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-gray-400">Enter chords and timestamps (in seconds):</p>
+                    {manualChords.map((chord, idx) => (
+                      <div key={idx} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          placeholder="Chord (e.g., G)"
+                          value={chord.name}
+                          onChange={(e) => updateManualChord(idx, 'name', e.target.value)}
+                          className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Time (s)"
+                          value={chord.timestamp}
+                          onChange={(e) => updateManualChord(idx, 'timestamp', e.target.value)}
+                          className="w-20 px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                        {manualChords.length > 1 && (
+                          <button
+                            onClick={() => removeManualChord(idx)}
+                            className="p-2 bg-red-600 hover:bg-red-700 rounded"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={addManualChordRow}
+                        className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded flex items-center gap-1"
+                      >
+                        <Plus className="w-4 h-4" /> Add Chord
+                      </button>
+                      <button
+                        onClick={saveManualChords}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded flex items-center gap-2"
+                      >
+                        <Save className="w-4 h-4" /> Save Chords
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {chords && !manualMode && (
                   <div className="space-y-1 max-h-80 overflow-y-auto">
                     {chords.chords.map((chord, idx) => (
                       <div
                         key={idx}
                         className="flex justify-between items-center p-3 bg-gray-700 rounded active:bg-gray-600"
                       >
-                        <span className="text-xl font-mono font-bold text-green-300">
-                          {chord.name}
-                        </span>
-                        <span className="text-sm text-gray-300">
-                          {formatTime(chord.timestamp)}
-                        </span>
+                        <span className="text-xl font-mono font-bold text-green-300">{chord.name}</span>
+                        <span className="text-sm text-gray-300">{formatTime(chord.timestamp)}</span>
                       </div>
                     ))}
                   </div>
@@ -342,7 +329,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* Settings Modal */}
       <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </main>
   );
