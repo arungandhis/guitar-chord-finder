@@ -80,25 +80,42 @@ export default function Home() {
     setChordLoading(true);
 
     try {
-      // Use ChordMini public API (no key required)
-      const url = `https://api.chordmini.com/analyze?youtube_id=${video.id.videoId}`;
-      const res = await axios.get(url);
+      // Step 1: Search Songsterr for the song using video title
+      const searchUrl = `https://www.songsterr.com/a/wa/bestMatchForQueryStringPart?s=${encodeURIComponent(
+        video.snippet.title
+      )}`;
+      const searchRes = await axios.get(searchUrl);
+      const songData = searchRes.data;
 
-      const chordMiniData = res.data;
-      if (chordMiniData && chordMiniData.chord_progression) {
+      if (!songData || !songData.id) {
+        setError('Song not found on Songsterr.');
+        setChordLoading(false);
+        return;
+      }
+
+      // Step 2: Fetch tab data in JSON format
+      const tabUrl = `https://www.songsterr.com/a/wa/tab?id=${songData.id}`;
+      const tabRes = await axios.get(tabUrl, {
+        headers: { Accept: 'application/json' },
+      });
+      const tabData = tabRes.data;
+
+      // Step 3: Extract chord progression from tab JSON
+      // Songsterr's tab JSON contains a "chords" array with timing info
+      if (tabData && tabData.chords && tabData.chords.length > 0) {
         const formattedChords = {
-          chords: chordMiniData.chord_progression.map((item: any) => ({
-            name: item.chord,
-            timestamp: item.start,
+          chords: tabData.chords.map((chord: any) => ({
+            name: chord.chordName,
+            timestamp: chord.time, // time in seconds
           })),
         };
         setChords(formattedChords);
       } else {
-        setError('No chords found for this video. It may not be in ChordMini yet.');
+        setError('No chord data available for this song on Songsterr.');
       }
     } catch (err: any) {
-      console.error('Chord API error:', err);
-      setError('Failed to load chords. The ChordMini service might be temporarily unavailable.');
+      console.error('Songsterr API error:', err);
+      setError('Failed to load chords from Songsterr. Please try again later.');
     } finally {
       setChordLoading(false);
     }
@@ -118,7 +135,7 @@ export default function Home() {
             <Music className="w-7 h-7 text-green-400" />
             Chord Finder
           </h1>
-          <p className="text-gray-400 text-sm">YouTube → Chords</p>
+          <p className="text-gray-400 text-sm">YouTube → Chords (via Songsterr)</p>
         </header>
 
         {/* Settings Button */}
@@ -241,7 +258,7 @@ export default function Home() {
                 {chordLoading && (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="animate-spin w-6 h-6 text-green-400" />
-                    <span className="ml-2">Analyzing with ChordMini...</span>
+                    <span className="ml-2">Fetching from Songsterr...</span>
                   </div>
                 )}
 
