@@ -80,7 +80,7 @@ export default function Home() {
     setChordLoading(true);
 
     try {
-      // Step 1: Search Songsterr for the song using video title
+      // Step 1: Get the best match from Songsterr using the video title
       const searchUrl = `https://www.songsterr.com/a/wa/bestMatchForQueryStringPart?s=${encodeURIComponent(
         video.snippet.title
       )}`;
@@ -88,25 +88,48 @@ export default function Home() {
       const songData = searchRes.data;
 
       if (!songData || !songData.id) {
+        // Fallback: Try searching by artist
+        const artistName = video.snippet.channelTitle;
+        const fallbackUrl = `https://www.songsterr.com/a/ra/songs/byartists.json?artists=${encodeURIComponent(artistName)}`;
+        const fallbackRes = await axios.get(fallbackUrl);
+        if (fallbackRes.data && fallbackRes.data.length > 0) {
+          // Use the first song by that artist
+          const firstSong = fallbackRes.data[0];
+          const tabUrl = `https://www.songsterr.com/a/wa/view?r=${firstSong.id}`;
+          const tabRes = await axios.get(tabUrl, {
+            headers: { Accept: 'application/json' },
+          });
+          const tabData = tabRes.data;
+          if (tabData && tabData.chords) {
+            const formattedChords = {
+              chords: tabData.chords.map((chord: any) => ({
+                name: chord.chordName,
+                timestamp: chord.time,
+              })),
+            };
+            setChords(formattedChords);
+            setChordLoading(false);
+            return;
+          }
+        }
         setError('Song not found on Songsterr.');
         setChordLoading(false);
         return;
       }
 
-      // Step 2: Fetch tab data in JSON format
-      const tabUrl = `https://www.songsterr.com/a/wa/tab?id=${songData.id}`;
+      // Step 2: Fetch the tab data using the correct endpoint
+      const tabUrl = `https://www.songsterr.com/a/wa/view?r=${songData.id}`;
       const tabRes = await axios.get(tabUrl, {
         headers: { Accept: 'application/json' },
       });
       const tabData = tabRes.data;
 
       // Step 3: Extract chord progression from tab JSON
-      // Songsterr's tab JSON contains a "chords" array with timing info
       if (tabData && tabData.chords && tabData.chords.length > 0) {
         const formattedChords = {
           chords: tabData.chords.map((chord: any) => ({
             name: chord.chordName,
-            timestamp: chord.time, // time in seconds
+            timestamp: chord.time,
           })),
         };
         setChords(formattedChords);
@@ -115,7 +138,11 @@ export default function Home() {
       }
     } catch (err: any) {
       console.error('Songsterr API error:', err);
-      setError('Failed to load chords from Songsterr. Please try again later.');
+      if (err.message?.includes('CORS')) {
+        setError('CORS error: Unable to fetch from Songsterr. Try using a CORS proxy.');
+      } else {
+        setError('Failed to load chords from Songsterr. Please try again later.');
+      }
     } finally {
       setChordLoading(false);
     }
