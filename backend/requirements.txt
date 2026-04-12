@@ -1,6 +1,6 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-yt-dlp==2025.2.21
+yt-dlp==2026.3.17
 demucs==4.0.1
 basic-pitch==0.3.1
 librosa==0.10.2
