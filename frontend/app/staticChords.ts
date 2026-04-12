@@ -110,3 +110,21 @@ export function getFavoriteSongs(): SongData[] {
   const favIds = getFavoriteIds();
   return BOLLYWOOD_SONGS.filter(song => favIds.includes(song.id));
 }
+export function exportDatabase(): string {
+  const custom = getCustomSongs();
+  const fullDB = BOLLYWOOD_SONGS.map(song => custom[song.id] || song);
+  return JSON.stringify(fullDB, null, 2);
+}
+
+export function importDatabase(jsonString: string): void {
+  try {
+    const imported = JSON.parse(jsonString) as SongData[];
+    const custom = getCustomSongs();
+    imported.forEach(song => {
+      custom[song.id] = song;
+    });
+    localStorage.setItem(CUSTOM_SONGS_KEY, JSON.stringify(custom));
+  } catch (e) {
+    console.error('Invalid import file');
+  }
+}
