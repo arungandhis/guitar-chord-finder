@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, X } from 'lucide-react';
+import { Settings as SettingsIcon, X, Download, Upload } from 'lucide-react';
+import { exportDatabase, importDatabase } from '../staticChords';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -23,6 +24,29 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     window.location.reload();
   };
 
+  const handleExport = () => {
+    const data = exportDatabase();
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bollywood_chords_backup.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      importDatabase(ev.target?.result as string);
+      alert('Database imported! Reloading...');
+      window.location.reload();
+    };
+    reader.readAsText(file);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -31,56 +55,48 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold flex items-center gap-2">
             <SettingsIcon className="w-5 h-5" />
-            API Settings
+            Settings
           </h2>
           <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <p className="text-sm text-gray-400 mb-4">
-          Enter your YouTube API key. It is stored only in your browser.
-        </p>
-
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">
-              YouTube Data API v3 Key
-            </label>
+            <label className="block text-sm font-medium mb-1">YouTube Data API v3 Key</label>
             <input
               type="password"
               value={youtubeKey}
               onChange={(e) => setYoutubeKey(e.target.value)}
               placeholder="AIzaSy..."
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded"
             />
-            <a
-              href="https://console.cloud.google.com/apis/credentials"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-green-400 mt-1 inline-block"
-            >
-              Get a YouTube API key →
-            </a>
           </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Chord data is provided by Songsterr (free, no key required).
-          </p>
+
+          <div className="border-t border-gray-700 pt-4">
+            <p className="text-sm font-medium mb-2">Database Management</p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleExport}
+                className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded flex items-center justify-center gap-1"
+              >
+                <Download className="w-4 h-4" /> Export
+              </button>
+              <label className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 rounded flex items-center justify-center gap-1 cursor-pointer">
+                <Upload className="w-4 h-4" /> Import
+                <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+              </label>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Export your edited chords/lyrics to a file. Import to restore or share.
+            </p>
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 mt-6">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={saveSettings}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded"
-          >
-            Save
-          </button>
+          <button onClick={onClose} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded">Cancel</button>
+          <button onClick={saveSettings} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded">Save</button>
         </div>
       </div>
     </div>
