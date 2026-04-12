@@ -34,9 +34,10 @@ def process_transcription(job_id: str, youtube_url: str, redis_client):
         # Separate
         separate_guitar(audio_input, demucs_output)
         
-        # Locate guitar stem
+        # Locate guitar stem (demucs output path may vary slightly; adjust if needed)
         guitar_stem = os.path.join(temp_dir, "separated", "htdemucs", "audio", "guitar.wav")
         if not os.path.exists(guitar_stem):
+            # Fallback to original if separation fails
             guitar_stem = audio_input
         
         # Transcribe
