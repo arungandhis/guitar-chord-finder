@@ -1,5 +1,3 @@
-# backend/app/tasks.py
-
 import os
 import tempfile
 import subprocess
@@ -7,12 +5,10 @@ import shutil
 import random
 import yt_dlp
 from pytube import YouTube
-from youtube_dl_exec import youtube_dl_exec
 from basic_pitch.inference import predict
 from basic_pitch import ICASSP_2022_MODEL_PATH
 from app.fretting import midi_to_guitar_notes
 
-# List of realistic user agents to rotate
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -31,9 +27,7 @@ def download_audio_pytube(youtube_url: str, output_path: str) -> bool:
         audio_stream = yt.streams.filter(only_audio=True).first()
         if not audio_stream:
             return False
-        # Download to a temporary file
         temp_file = audio_stream.download(output_path=os.path.dirname(output_path))
-        # Convert to WAV using ffmpeg
         wav_path = output_path + '.wav'
         subprocess.run(
             ['ffmpeg', '-i', temp_file, '-acodec', 'pcm_s16le', '-ar', '44100', wav_path],
@@ -48,7 +42,7 @@ def download_audio_pytube(youtube_url: str, output_path: str) -> bool:
 
 def download_audio_ytdlp(youtube_url: str, output_path: str) -> bool:
     """
-    Attempt to download using yt-dlp with mobile client emulation.
+    Attempt to download using yt-dlp with mobile client emulation and rotating user agents.
     """
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -61,7 +55,7 @@ def download_audio_ytdlp(youtube_url: str, output_path: str) -> bool:
         'quiet': True,
         'no_warnings': True,
         'user_agent': random.choice(USER_AGENTS),
-        'extractor_args': {'youtube': {'player_client': ['android']}},
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
         'socket_timeout': 30,
     }
     try:
@@ -72,36 +66,15 @@ def download_audio_ytdlp(youtube_url: str, output_path: str) -> bool:
         return False
 
 
-def download_audio_youtubedl(youtube_url: str, output_path: str) -> bool:
-    """
-    Fallback to youtube-dl-exec.
-    """
-    try:
-        youtube_dl_exec(
-            youtube_url,
-            {
-                'extract-audio': True,
-                'audio-format': 'wav',
-                'output': output_path + '.%(ext)s',
-                'user-agent': random.choice(USER_AGENTS),
-            }
-        )
-        return True
-    except Exception:
-        return False
-
-
 def download_audio(youtube_url: str, output_base: str) -> str:
     """
-    Try multiple downloaders in sequence.
+    Try pytube first, then yt-dlp.
     Returns the path to the downloaded WAV file.
     Raises RuntimeError if all methods fail.
     """
     if download_audio_pytube(youtube_url, output_base):
         return output_base + '.wav'
     if download_audio_ytdlp(youtube_url, output_base):
-        return output_base + '.wav'
-    if download_audio_youtubedl(youtube_url, output_base):
         return output_base + '.wav'
     raise RuntimeError("All download methods failed. YouTube may be blocking this request.")
 
@@ -116,12 +89,7 @@ def separate_guitar(input_path: str, output_dir: str):
 
 def process_transcription(job_id: str, youtube_url: str, jobs: dict):
     """
-    Main transcription pipeline:
-    1. Download audio from YouTube.
-    2. Separate guitar stem using Demucs.
-    3. Transcribe with Basic Pitch.
-    4. Convert MIDI pitches to guitar fretting.
-    5. Update job status.
+    Main transcription pipeline.
     """
     temp_dir = tempfile.mkdtemp()
     audio_base = os.path.join(temp_dir, "audio")
@@ -134,16 +102,16 @@ def process_transcription(job_id: str, youtube_url: str, jobs: dict):
         # 2. Separate guitar stem
         separate_guitar(audio_file, demucs_output)
 
-        # 3. Locate guitar stem (Demucs output path may vary)
+        # 3. Locate guitar stem
         guitar_stem = os.path.join(
             temp_dir, "separated", "htdemucs",
             os.path.basename(audio_file).rsplit('.', 1)[0],
             "guitar.wav"
         )
         if not os.path.exists(guitar_stem):
-            guitar_stem = audio_file  # fallback to original audio
+            guitar_stem = audio_file
 
-        # 4. Transcribe with Basic Pitch
+        # 4. Transcribe
         model_output, midi_data, note_events = predict(
             guitar_stem,
             ICASSP_2022_MODEL_PATH,
@@ -154,10 +122,8 @@ def process_transcription(job_id: str, youtube_url: str, jobs: dict):
             maximum_frequency=1000,
         )
 
-        # 5. Convert to guitar string/fret notation
+        # 5. Convert to guitar fretting
         melody = midi_to_guitar_notes(note_events)
-
-        # 6. Update job status
         jobs[job_id] = {"status": "completed", "result": {"melody": melody}}
 
     except Exception as e:
@@ -169,7 +135,7 @@ def process_transcription(job_id: str, youtube_url: str, jobs: dict):
 
 def process_uploaded_file(job_id: str, file_path: str, jobs: dict):
     """
-    Process an uploaded audio file (bypasses YouTube download).
+    Process an uploaded audio file.
     """
     temp_dir = os.path.dirname(file_path)
     demucs_output = os.path.join(temp_dir, "separated")
