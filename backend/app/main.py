@@ -5,7 +5,6 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-import redis
 
 from app.tasks import process_transcription
 from app.models import TranscribeRequest, JobStatus
@@ -19,8 +18,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-r = redis.from_url(redis_url)
+# In-memory job storage
+jobs: Dict[str, Dict[str, Any]] = {}
 
 @app.get("/")
 def root():
@@ -32,16 +31,17 @@ def root():
 @app.post("/transcribe")
 async def transcribe(request: TranscribeRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
-    r.setex(f"job:{job_id}", 3600, json.dumps({"status": "processing"}))
-    background_tasks.add_task(process_transcription, job_id, request.youtube_url, r)
+    # Store initial status in memory
+    jobs[job_id] = {"status": "processing"}
+    background_tasks.add_task(process_transcription, job_id, request.youtube_url, jobs)
     return {"job_id": job_id}
 
 @app.get("/transcribe/status/{job_id}")
 async def get_status(job_id: str):
-    data = r.get(f"job:{job_id}")
+    data = jobs.get(job_id)
     if not data:
         raise HTTPException(status_code=404, detail="Job not found")
-    return json.loads(data)
+    return data
 
 @app.get("/health")
 def health():
