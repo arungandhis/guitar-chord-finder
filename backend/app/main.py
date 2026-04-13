@@ -1,13 +1,11 @@
-import os
 import uuid
 import json
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 from app.tasks import process_transcription
-from app.models import TranscribeRequest, JobStatus
+from app.models import TranscribeRequest
 
 app = FastAPI()
 
@@ -18,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory job storage
+# In-memory job storage (will persist as long as the service is running)
 jobs: Dict[str, Dict[str, Any]] = {}
 
 @app.get("/")
@@ -31,7 +29,6 @@ def root():
 @app.post("/transcribe")
 async def transcribe(request: TranscribeRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
-    # Store initial status in memory
     jobs[job_id] = {"status": "processing"}
     background_tasks.add_task(process_transcription, job_id, request.youtube_url, jobs)
     return {"job_id": job_id}
