@@ -19,16 +19,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Use Redis for job storage (Render provides a free Redis instance)
 redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
 r = redis.from_url(redis_url)
+
+@app.get("/")
+def root():
+    return {
+        "message": "Bollywood Guitar Tab Generator API is running",
+        "endpoints": ["/health", "/transcribe", "/transcribe/status/{job_id}"]
+    }
 
 @app.post("/transcribe")
 async def transcribe(request: TranscribeRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
-    # Store initial status
     r.setex(f"job:{job_id}", 3600, json.dumps({"status": "processing"}))
-    # Start background task
     background_tasks.add_task(process_transcription, job_id, request.youtube_url, r)
     return {"job_id": job_id}
 
