@@ -12,7 +12,7 @@ import Settings from './components/Settings';
 import {
   findSongByTitle, getAllSongs, SongData, ChordEntry, MelodyNote,
   toggleFavorite, isFavorite, getFavoriteSongs, getSongWithCustom,
-  saveCustomSong, exportDatabase,
+  saveCustomSong,
 } from './staticChords';
 
 interface VideoItem {
@@ -182,11 +182,16 @@ export default function Home() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const getBackendUrl = (): string | null => {
+    return localStorage.getItem('transcribe_backend_url');
+  };
+
   const handleFetchLyrics = async () => {
     if (!songData) return;
     setFetchingLyrics(true);
     try {
-      const res = await fetch(`/api/lyrics?artist=${encodeURIComponent(songData.artist)}&title=${encodeURIComponent(songData.title)}`);
+      const res = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(songData.artist)}/${encodeURIComponent(songData.title)}`);
+      if (!res.ok) throw new Error('Lyrics not found');
       const data = await res.json();
       if (data.lyrics) {
         const updatedSong: SongData = { ...songData, lyrics: data.lyrics };
@@ -202,11 +207,11 @@ export default function Home() {
     }
   };
 
-  const pollJobStatus = async (jobId: string): Promise<any> => {
+  const pollJobStatus = async (backendUrl: string, jobId: string): Promise<any> => {
     const maxAttempts = 60;
     let attempts = 0;
     while (attempts < maxAttempts) {
-      const res = await fetch(`/api/transcribe/status?jobId=${jobId}`);
+      const res = await fetch(`${backendUrl}/transcribe/status/${jobId}`);
       const data = await res.json();
       if (data.status === 'completed') return data.result;
       if (data.status === 'failed') throw new Error(data.error || 'Transcription failed');
@@ -217,18 +222,22 @@ export default function Home() {
   };
 
   const handleGenerateMelody = async () => {
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) {
+      alert('Please set the Transcription Backend URL in Settings.');
+      return;
+    }
     if (!selectedVideo) return;
     setGeneratingMelody(true);
     try {
-      const startRes = await fetch('/api/transcribe', {
+      const startRes = await fetch(`${backendUrl}/transcribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ youtubeUrl: `https://www.youtube.com/watch?v=${selectedVideo.id.videoId}` }),
+        body: JSON.stringify({ youtube_url: `https://www.youtube.com/watch?v=${selectedVideo.id.videoId}` }),
       });
-      const { jobId, error: startError } = await startRes.json();
-      if (startError) throw new Error(startError);
-
-      const result = await pollJobStatus(jobId);
+      if (!startRes.ok) throw new Error('Failed to start transcription');
+      const { job_id } = await startRes.json();
+      const result = await pollJobStatus(backendUrl, job_id);
       if (result.melody) {
         const updatedSong: SongData = songData
           ? { ...songData, melody: result.melody }
