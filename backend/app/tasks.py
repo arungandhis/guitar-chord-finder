@@ -31,7 +31,6 @@ def fetch_free_proxies():
         return []
 
 def download_audio_pytube(youtube_url: str, output_path: str) -> bool:
-    """Attempt pytube with random user agent."""
     try:
         yt = YouTube(youtube_url)
         audio_stream = yt.streams.filter(only_audio=True).first()
@@ -49,7 +48,6 @@ def download_audio_pytube(youtube_url: str, output_path: str) -> bool:
         return False
 
 def download_audio_ytdlp(youtube_url: str, output_path: str, proxy: str = None) -> bool:
-    """Attempt yt-dlp with optional proxy."""
     ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
@@ -74,44 +72,29 @@ def download_audio_ytdlp(youtube_url: str, output_path: str, proxy: str = None) 
         return False
 
 def download_audio(youtube_url: str, output_base: str) -> str:
-    """Try pytube first, then yt-dlp with proxies."""
     if download_audio_pytube(youtube_url, output_base):
         return output_base + '.wav'
 
     proxies = fetch_free_proxies()
-    for proxy in proxies[:10]:  # try up to 10 proxies
+    for proxy in proxies[:10]:
         if download_audio_ytdlp(youtube_url, output_base, proxy):
             return output_base + '.wav'
 
-    # Last attempt without proxy
     if download_audio_ytdlp(youtube_url, output_base):
         return output_base + '.wav'
 
     raise RuntimeError("All download methods failed. YouTube may be blocking this request.")
 
-def separate_guitar(input_path: str, output_dir: str):
-    cmd = ["demucs", "--two-stems=vocals", "-o", output_dir, input_path]
-    subprocess.run(cmd, check=True, capture_output=True)
-
 def process_transcription(job_id: str, youtube_url: str, jobs: dict):
     temp_dir = tempfile.mkdtemp()
     audio_base = os.path.join(temp_dir, "audio")
-    demucs_output = os.path.join(temp_dir, "separated")
 
     try:
         audio_file = download_audio(youtube_url, audio_base)
-        separate_guitar(audio_file, demucs_output)
 
-        guitar_stem = os.path.join(
-            temp_dir, "separated", "htdemucs",
-            os.path.basename(audio_file).rsplit('.', 1)[0],
-            "guitar.wav"
-        )
-        if not os.path.exists(guitar_stem):
-            guitar_stem = audio_file
-
+        # Skip Demucs – transcribe full audio directly
         model_output, midi_data, note_events = predict(
-            guitar_stem,
+            audio_file,
             ICASSP_2022_MODEL_PATH,
             onset_threshold=0.5,
             frame_threshold=0.3,
@@ -128,21 +111,9 @@ def process_transcription(job_id: str, youtube_url: str, jobs: dict):
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 def process_uploaded_file(job_id: str, file_path: str, jobs: dict):
-    temp_dir = os.path.dirname(file_path)
-    demucs_output = os.path.join(temp_dir, "separated")
-
     try:
-        separate_guitar(file_path, demucs_output)
-        guitar_stem = os.path.join(
-            temp_dir, "separated", "htdemucs",
-            os.path.basename(file_path).rsplit('.', 1)[0],
-            "guitar.wav"
-        )
-        if not os.path.exists(guitar_stem):
-            guitar_stem = file_path
-
         model_output, midi_data, note_events = predict(
-            guitar_stem,
+            file_path,
             ICASSP_2022_MODEL_PATH,
             onset_threshold=0.5,
             frame_threshold=0.3,
@@ -155,5 +126,3 @@ def process_uploaded_file(job_id: str, file_path: str, jobs: dict):
 
     except Exception as e:
         jobs[job_id] = {"status": "failed", "error": str(e)}
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
