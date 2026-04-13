@@ -3,6 +3,7 @@ import tempfile
 import subprocess
 import shutil
 import random
+import requests
 import yt_dlp
 from pytube import YouTube
 from basic_pitch.inference import predict
@@ -16,12 +17,21 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
 ]
 
+def fetch_free_proxies():
+    """Fetch a list of free HTTP proxies from proxylist.geonode.com."""
+    try:
+        resp = requests.get(
+            "https://proxylist.geonode.com/api/proxy-list?limit=50&page=1&sort_by=lastChecked&sort_type=desc&protocols=http",
+            timeout=10
+        )
+        data = resp.json()
+        proxies = [f"{p['ip']}:{p['port']}" for p in data.get('data', []) if p.get('upTime') > 80]
+        return proxies
+    except:
+        return []
 
 def download_audio_pytube(youtube_url: str, output_path: str) -> bool:
-    """
-    Attempt to download audio using pytube.
-    Returns True if successful, False otherwise.
-    """
+    """Attempt pytube with random user agent."""
     try:
         yt = YouTube(youtube_url)
         audio_stream = yt.streams.filter(only_audio=True).first()
@@ -31,19 +41,15 @@ def download_audio_pytube(youtube_url: str, output_path: str) -> bool:
         wav_path = output_path + '.wav'
         subprocess.run(
             ['ffmpeg', '-i', temp_file, '-acodec', 'pcm_s16le', '-ar', '44100', wav_path],
-            check=True,
-            capture_output=True
+            check=True, capture_output=True
         )
         os.remove(temp_file)
         return True
-    except Exception:
+    except:
         return False
 
-
-def download_audio_ytdlp(youtube_url: str, output_path: str) -> bool:
-    """
-    Attempt to download using yt-dlp with mobile client emulation and rotating user agents.
-    """
+def download_audio_ytdlp(youtube_url: str, output_path: str, proxy: str = None) -> bool:
+    """Attempt yt-dlp with optional proxy."""
     ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
@@ -58,51 +64,44 @@ def download_audio_ytdlp(youtube_url: str, output_path: str) -> bool:
         'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
         'socket_timeout': 30,
     }
+    if proxy:
+        ydl_opts['proxy'] = f"http://{proxy}"
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([youtube_url])
         return True
-    except Exception:
+    except:
         return False
 
-
 def download_audio(youtube_url: str, output_base: str) -> str:
-    """
-    Try pytube first, then yt-dlp.
-    Returns the path to the downloaded WAV file.
-    Raises RuntimeError if all methods fail.
-    """
+    """Try pytube first, then yt-dlp with proxies."""
     if download_audio_pytube(youtube_url, output_base):
         return output_base + '.wav'
+
+    proxies = fetch_free_proxies()
+    for proxy in proxies[:10]:  # try up to 10 proxies
+        if download_audio_ytdlp(youtube_url, output_base, proxy):
+            return output_base + '.wav'
+
+    # Last attempt without proxy
     if download_audio_ytdlp(youtube_url, output_base):
         return output_base + '.wav'
+
     raise RuntimeError("All download methods failed. YouTube may be blocking this request.")
 
-
 def separate_guitar(input_path: str, output_dir: str):
-    """
-    Use Demucs to isolate the guitar stem.
-    """
     cmd = ["demucs", "--two-stems=vocals", "-o", output_dir, input_path]
     subprocess.run(cmd, check=True, capture_output=True)
 
-
 def process_transcription(job_id: str, youtube_url: str, jobs: dict):
-    """
-    Main transcription pipeline.
-    """
     temp_dir = tempfile.mkdtemp()
     audio_base = os.path.join(temp_dir, "audio")
     demucs_output = os.path.join(temp_dir, "separated")
 
     try:
-        # 1. Download audio
         audio_file = download_audio(youtube_url, audio_base)
-
-        # 2. Separate guitar stem
         separate_guitar(audio_file, demucs_output)
 
-        # 3. Locate guitar stem
         guitar_stem = os.path.join(
             temp_dir, "separated", "htdemucs",
             os.path.basename(audio_file).rsplit('.', 1)[0],
@@ -111,7 +110,6 @@ def process_transcription(job_id: str, youtube_url: str, jobs: dict):
         if not os.path.exists(guitar_stem):
             guitar_stem = audio_file
 
-        # 4. Transcribe
         model_output, midi_data, note_events = predict(
             guitar_stem,
             ICASSP_2022_MODEL_PATH,
@@ -121,22 +119,15 @@ def process_transcription(job_id: str, youtube_url: str, jobs: dict):
             minimum_frequency=80,
             maximum_frequency=1000,
         )
-
-        # 5. Convert to guitar fretting
         melody = midi_to_guitar_notes(note_events)
         jobs[job_id] = {"status": "completed", "result": {"melody": melody}}
 
     except Exception as e:
         jobs[job_id] = {"status": "failed", "error": str(e)}
-
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-
 def process_uploaded_file(job_id: str, file_path: str, jobs: dict):
-    """
-    Process an uploaded audio file.
-    """
     temp_dir = os.path.dirname(file_path)
     demucs_output = os.path.join(temp_dir, "separated")
 
@@ -164,6 +155,5 @@ def process_uploaded_file(job_id: str, file_path: str, jobs: dict):
 
     except Exception as e:
         jobs[job_id] = {"status": "failed", "error": str(e)}
-
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
