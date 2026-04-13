@@ -22,25 +22,25 @@ def separate_guitar(input_path: str, output_dir: str):
     cmd = ["demucs", "--two-stems=vocals", "-o", output_dir, input_path]
     subprocess.run(cmd, check=True, capture_output=True)
 
-def process_transcription(job_id: str, youtube_url: str, redis_client):
+def process_transcription(job_id: str, youtube_url: str, jobs: dict):
     temp_dir = tempfile.mkdtemp()
     audio_input = os.path.join(temp_dir, "audio.wav")
     demucs_output = os.path.join(temp_dir, "separated")
     
     try:
-        # Download
+        # 1. Download audio
         download_audio(youtube_url, audio_input)
         
-        # Separate
+        # 2. Separate guitar stem (optional but improves accuracy)
         separate_guitar(audio_input, demucs_output)
         
-        # Locate guitar stem (demucs output path may vary slightly; adjust if needed)
+        # 3. Locate the guitar stem (Demucs output path)
         guitar_stem = os.path.join(temp_dir, "separated", "htdemucs", "audio", "guitar.wav")
         if not os.path.exists(guitar_stem):
             # Fallback to original if separation fails
             guitar_stem = audio_input
         
-        # Transcribe
+        # 4. Transcribe with Basic Pitch
         model_output, midi_data, note_events = predict(
             guitar_stem,
             ICASSP_2022_MODEL_PATH,
@@ -51,17 +51,20 @@ def process_transcription(job_id: str, youtube_url: str, redis_client):
             maximum_frequency=1000,
         )
         
+        # 5. Convert MIDI pitches to guitar string/fret positions
         melody = midi_to_guitar_notes(note_events)
         
-        # Store result
-        redis_client.setex(f"job:{job_id}", 3600, json.dumps({
+        # 6. Store completed result in the shared jobs dictionary
+        jobs[job_id] = {
             "status": "completed",
             "result": {"melody": melody}
-        }))
+        }
     except Exception as e:
-        redis_client.setex(f"job:{job_id}", 3600, json.dumps({
+        # Store failure status with error message
+        jobs[job_id] = {
             "status": "failed",
             "error": str(e)
-        }))
+        }
     finally:
+        # Cleanup temporary files
         shutil.rmtree(temp_dir, ignore_errors=True)
