@@ -6,13 +6,13 @@ import YouTube from 'react-youtube';
 import {
   Search, Loader2, Music, ChevronLeft, Settings as SettingsIcon,
   AlertCircle, Plus, Save, X, List, Guitar, Star, Edit3, FileText,
-  Sparkles, ExternalLink,
+  ExternalLink, Trash2,
 } from 'lucide-react';
 import Settings from './components/Settings';
 import {
-  findSongByTitle, getAllSongs, SongData, ChordEntry, MelodyNote,
+  getAllSongs, SongData, ChordEntry, MelodyNote,
   toggleFavorite, isFavorite, getFavoriteSongs, getSongWithCustom,
-  saveCustomSong,
+  saveCustomSong, BOLLYWOOD_SONGS,
 } from './staticChords';
 
 interface VideoItem {
@@ -30,11 +30,9 @@ export default function Home() {
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null);
   const [songData, setSongData] = useState<SongData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [chordLoading, setChordLoading] = useState(false);
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hasKeys, setHasKeys] = useState(false);
-  const [manualMode, setManualMode] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editChords, setEditChords] = useState<ChordEntry[]>([]);
   const [editMelody, setEditMelody] = useState<MelodyNote[]>([]);
@@ -44,7 +42,6 @@ export default function Home() {
   const [allSongs] = useState(() => getAllSongs());
   const [favorites, setFavorites] = useState<SongData[]>([]);
   const [activeTab, setActiveTab] = useState<'chords' | 'melody' | 'lyrics'>('chords');
-  const [generatingMelody, setGeneratingMelody] = useState(false);
 
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
@@ -80,8 +77,7 @@ export default function Home() {
       }
     } catch (err: any) {
       console.error('YouTube API error:', err);
-      const errorMessage = err.response?.data?.error?.message || 'Search failed. Check your API key or try again later.';
-      setError(errorMessage);
+      setError('Search failed. Check your API key.');
     } finally {
       setLoading(false);
     }
@@ -100,32 +96,46 @@ export default function Home() {
     setSelectedVideo({
       id: { videoId: customSong.videoId },
       snippet: {
-        title: `${customSong.title} - ${customSong.artist}`,
+        title: customSong.displayName,
         thumbnails: { medium: { url: `https://img.youtube.com/vi/${customSong.videoId}/mqdefault.jpg` } },
         channelTitle: customSong.artist,
       },
     });
     loadSongData(customSong);
     setError('');
-    setManualMode(false);
     setEditMode(false);
     setActiveTab('chords');
   };
 
-  const handleSelectVideo = async (video: VideoItem) => {
+  const handleSelectVideo = (video: VideoItem) => {
     setSelectedVideo(video);
-    setChordLoading(true);
-    setManualMode(false);
-    const found = findSongByTitle(video.snippet.title);
+    // Check if this video matches any song in our database
+    const found = BOLLYWOOD_SONGS.find(s => s.videoId === video.id.videoId);
     if (found) {
       const customSong = getSongWithCustom(found.id) || found;
       loadSongData(customSong);
-      setError('');
     } else {
-      setSongData(null);
-      setError('Song not in Bollywood database. You can add chords manually below.');
+      // Create a new song entry with empty data
+      const newSong: SongData = {
+        id: video.id.videoId,
+        title: video.snippet.title,
+        artist: video.snippet.channelTitle,
+        year: new Date().getFullYear(),
+        videoId: video.id.videoId,
+        keywords: [],
+        displayName: video.snippet.title,
+        chords: [],
+        melody: [],
+        lyrics: '',
+      };
+      setSongData(newSong);
+      setEditChords([]);
+      setEditMelody([]);
+      setEditLyrics('');
     }
-    setChordLoading(false);
+    setError('');
+    setEditMode(false);
+    setActiveTab('chords');
   };
 
   const enterEditMode = () => {
@@ -181,76 +191,10 @@ export default function Home() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getBackendUrl = (): string | null => {
-    return localStorage.getItem('transcribe_backend_url');
-  };
-
-  const handleFetchLyrics = () => {
+  const handleSearchLyrics = () => {
     if (!selectedVideo) return;
     const query = encodeURIComponent(`${selectedVideo.snippet.title} lyrics`);
     window.open(`https://www.google.com/search?q=${query}`, '_blank');
-  };
-
-  const pollJobStatus = async (backendUrl: string, jobId: string): Promise<any> => {
-    const maxAttempts = 60;
-    let attempts = 0;
-    while (attempts < maxAttempts) {
-      const res = await fetch(`${backendUrl}/transcribe/status/${jobId}`);
-      const data = await res.json();
-      if (data.status === 'completed') return data.result;
-      if (data.status === 'failed') throw new Error(data.error || 'Transcription failed');
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      attempts++;
-    }
-    throw new Error('Transcription timed out');
-  };
-
-  const handleGenerateMelody = async () => {
-    const backendUrl = getBackendUrl();
-    if (!backendUrl) {
-      alert('Please set the Transcription Backend URL in Settings.');
-      return;
-    }
-    if (!selectedVideo) return;
-    setGeneratingMelody(true);
-    try {
-      const startRes = await fetch(`${backendUrl}/transcribe`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ youtube_url: `https://www.youtube.com/watch?v=${selectedVideo.id.videoId}` }),
-      });
-      if (!startRes.ok) throw new Error('Failed to start transcription');
-      const { job_id } = await startRes.json();
-      const result = await pollJobStatus(backendUrl, job_id);
-      if (result.melody) {
-        if (songData) {
-          const updatedSong: SongData = { ...songData, melody: result.melody };
-          saveCustomSong(updatedSong);
-          loadSongData(updatedSong);
-        } else {
-          // Create a new song entry for the video
-          const newSong: SongData = {
-            id: selectedVideo.id.videoId,
-            title: selectedVideo.snippet.title,
-            artist: selectedVideo.snippet.channelTitle,
-            year: new Date().getFullYear(),
-            videoId: selectedVideo.id.videoId,
-            keywords: [],
-            displayName: selectedVideo.snippet.title,
-            chords: [],
-            melody: result.melody,
-          };
-          saveCustomSong(newSong);
-          setSongData(newSong);
-        }
-      } else {
-        alert('No melody generated.');
-      }
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
-    } finally {
-      setGeneratingMelody(false);
-    }
   };
 
   const renderChords = (chords: ChordEntry[], editable: boolean) => (
@@ -259,9 +203,9 @@ export default function Home() {
         <div key={idx} className="flex justify-between items-center p-3 bg-gray-700 rounded">
           {editable ? (
             <>
-              <input type="text" value={chord.name} onChange={(e) => updateEditChord(idx, 'name', e.target.value)} className="w-20 px-2 py-1 bg-gray-600 rounded" />
-              <input type="number" value={chord.timestamp} onChange={(e) => updateEditChord(idx, 'timestamp', e.target.value)} className="w-16 px-2 py-1 bg-gray-600 rounded" />
-              <button onClick={() => removeEditChord(idx)} className="text-red-400">✕</button>
+              <input type="text" value={chord.name} onChange={(e) => updateEditChord(idx, 'name', e.target.value)} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Chord" />
+              <input type="number" value={chord.timestamp} onChange={(e) => updateEditChord(idx, 'timestamp', e.target.value)} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Time" step="0.1" />
+              <button onClick={() => removeEditChord(idx)} className="text-red-400"><Trash2 className="w-4 h-4" /></button>
             </>
           ) : (
             <>
@@ -271,7 +215,11 @@ export default function Home() {
           )}
         </div>
       ))}
-      {editable && <button onClick={addEditChord} className="mt-2 text-sm text-green-400 flex items-center gap-1"><Plus className="w-3 h-3" /> Add Chord</button>}
+      {editable && (
+        <button onClick={addEditChord} className="mt-2 text-sm text-green-400 flex items-center gap-1">
+          <Plus className="w-3 h-3" /> Add Chord
+        </button>
+      )}
     </div>
   );
 
@@ -285,9 +233,9 @@ export default function Home() {
                 <select value={note.string} onChange={(e) => updateEditMelody(idx, 'string', parseInt(e.target.value))} className="w-16 px-2 py-1 bg-gray-600 rounded">
                   {[1,2,3,4,5,6].map(s => <option key={s} value={s}>{s}e</option>)}
                 </select>
-                <input type="number" value={note.fret} onChange={(e) => updateEditMelody(idx, 'fret', parseInt(e.target.value))} className="w-16 px-2 py-1 bg-gray-600 rounded" />
-                <input type="number" value={note.timestamp} onChange={(e) => updateEditMelody(idx, 'timestamp', parseFloat(e.target.value))} className="w-16 px-2 py-1 bg-gray-600 rounded" />
-                <button onClick={() => removeEditMelody(idx)} className="text-red-400">✕</button>
+                <input type="number" value={note.fret} onChange={(e) => updateEditMelody(idx, 'fret', parseInt(e.target.value))} className="w-16 px-2 py-1 bg-gray-600 rounded" placeholder="Fret" />
+                <input type="number" value={note.timestamp} onChange={(e) => updateEditMelody(idx, 'timestamp', parseFloat(e.target.value))} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Time" step="0.1" />
+                <button onClick={() => removeEditMelody(idx)} className="text-red-400"><Trash2 className="w-4 h-4" /></button>
               </>
             ) : (
               <>
@@ -298,9 +246,13 @@ export default function Home() {
           </div>
         ))
       ) : (
-        <p className="text-gray-400 text-center py-4">No melody notes yet. Click "Generate Melody" or edit to add manually.</p>
+        <p className="text-gray-400 text-center py-4">No melody notes yet. Edit to add some.</p>
       )}
-      {editable && <button onClick={addEditMelody} className="mt-2 text-sm text-green-400 flex items-center gap-1"><Plus className="w-3 h-3" /> Add Note</button>}
+      {editable && (
+        <button onClick={addEditMelody} className="mt-2 text-sm text-green-400 flex items-center gap-1">
+          <Plus className="w-3 h-3" /> Add Note
+        </button>
+      )}
     </div>
   );
 
@@ -309,7 +261,7 @@ export default function Home() {
       {editable ? (
         <textarea value={editLyrics} onChange={(e) => setEditLyrics(e.target.value)} className="w-full h-64 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white" placeholder="Paste lyrics here..." />
       ) : (
-        <pre className="whitespace-pre-wrap font-sans text-gray-300">{lyrics || 'No lyrics available. Click "Search Lyrics" to find them online.'}</pre>
+        <pre className="whitespace-pre-wrap font-sans text-gray-300">{lyrics || 'No lyrics yet. Edit to add or search online.'}</pre>
       )}
     </div>
   );
@@ -322,9 +274,9 @@ export default function Home() {
         <header className="text-center mb-6">
           <h1 className="text-3xl md:text-5xl font-bold mb-1 flex items-center justify-center gap-2">
             <Music className="w-7 h-7 text-green-400" />
-            Bollywood Tab Generator
+            Bollywood Tab Library
           </h1>
-          <p className="text-gray-400 text-sm">100+ Songs • AI Melody • Lyrics • Edit & Save</p>
+          <p className="text-gray-400 text-sm">Curate your own chords & melody tabs</p>
         </header>
 
         <div className="absolute top-0 right-0 flex gap-2">
@@ -383,25 +335,11 @@ export default function Home() {
                 </div>
                 <div className="flex gap-2">
                   {activeTab === 'lyrics' && (
-                    <button
-                      onClick={handleFetchLyrics}
-                      className="text-sm bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded flex items-center gap-1"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      Search Lyrics
+                    <button onClick={handleSearchLyrics} className="text-sm bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded flex items-center gap-1">
+                      <ExternalLink className="w-4 h-4" /> Search Lyrics
                     </button>
                   )}
-                  {activeTab === 'melody' && (
-                    <button
-                      onClick={handleGenerateMelody}
-                      disabled={generatingMelody}
-                      className="text-sm bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded flex items-center gap-1"
-                    >
-                      {generatingMelody ? <Loader2 className="animate-spin w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                      Generate Melody
-                    </button>
-                  )}
-                  {songData && !manualMode && (
+                  {songData && (
                     !editMode ? (
                       <button onClick={enterEditMode} className="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded flex items-center gap-1"><Edit3 className="w-4 h-4" /> Edit</button>
                     ) : (
@@ -414,44 +352,12 @@ export default function Home() {
                 </div>
               </div>
 
-              {chordLoading && <div className="text-center py-8"><Loader2 className="animate-spin inline" /> Loading...</div>}
-
-              {!chordLoading && (
+              {songData && (
                 <>
-                  {activeTab === 'chords' && (
-                    songData ? renderChords(editMode ? editChords : songData.chords, editMode) : (
-                      <div className="text-center py-8 text-gray-400">
-                        No chord data. Edit to add some.
-                        {!manualMode && (
-                          <button onClick={() => setManualMode(true)} className="mt-2 block mx-auto px-4 py-2 bg-blue-600 rounded"><Plus className="inline w-4 h-4" /> Add Manually</button>
-                        )}
-                      </div>
-                    )
-                  )}
-                  {activeTab === 'melody' && (
-                    songData ? renderMelody(editMode ? editMelody : (songData.melody || []), editMode) : (
-                      <div className="text-center py-8 text-gray-400">
-                        No melody notes yet. Click "Generate Melody" above.
-                      </div>
-                    )
-                  )}
-                  {activeTab === 'lyrics' && (
-                    songData ? renderLyrics(editMode ? editLyrics : (songData.lyrics || ''), editMode) : (
-                      <div className="text-center py-8 text-gray-400">
-                        No lyrics saved. Click "Search Lyrics" to find them online.
-                      </div>
-                    )
-                  )}
+                  {activeTab === 'chords' && renderChords(editMode ? editChords : songData.chords, editMode)}
+                  {activeTab === 'melody' && renderMelody(editMode ? editMelody : (songData.melody || []), editMode)}
+                  {activeTab === 'lyrics' && renderLyrics(editMode ? editLyrics : (songData.lyrics || ''), editMode)}
                 </>
-              )}
-
-              {manualMode && (
-                <div className="space-y-4 mt-4">
-                  <h3 className="font-medium">Manual Entry</h3>
-                  {/* Manual chord and melody inputs (simplified) */}
-                  <p className="text-sm text-gray-400">Add chords and melody notes manually:</p>
-                  <button onClick={() => setManualMode(false)} className="px-4 py-2 bg-gray-600 rounded">Cancel</button>
-                </div>
               )}
             </div>
           </div>
