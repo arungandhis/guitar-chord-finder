@@ -6,7 +6,7 @@ import YouTube from 'react-youtube';
 import {
   Search, Loader2, Music, ChevronLeft, Settings as SettingsIcon,
   AlertCircle, Plus, Save, X, List, Guitar, Star, Edit3, FileText,
-  ExternalLink, Trash2,
+  ExternalLink, Trash2, Wand2,
 } from 'lucide-react';
 import Settings from './components/Settings';
 import {
@@ -22,6 +22,25 @@ interface VideoItem {
     thumbnails: { medium: { url: string } };
     channelTitle: string;
   };
+}
+
+// Helper: parse time string like "1:23" or "45.6" to seconds
+function parseTimeToSeconds(timeStr: string): number {
+  timeStr = timeStr.trim();
+  if (timeStr.includes(':')) {
+    const parts = timeStr.split(':');
+    if (parts.length === 2) {
+      return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
+    }
+  }
+  return parseFloat(timeStr) || 0;
+}
+
+// Helper: format seconds to MM:SS
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 export default function Home() {
@@ -42,6 +61,11 @@ export default function Home() {
   const [allSongs] = useState(() => getAllSongs());
   const [favorites, setFavorites] = useState<SongData[]>([]);
   const [activeTab, setActiveTab] = useState<'chords' | 'melody' | 'lyrics'>('chords');
+  
+  // Free text edit states
+  const [chordsText, setChordsText] = useState('');
+  const [melodyText, setMelodyText] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
@@ -88,6 +112,9 @@ export default function Home() {
     setEditChords(song.chords);
     setEditMelody(song.melody || []);
     setEditLyrics(song.lyrics || '');
+    // Generate free text representations
+    setChordsText(song.chords.map(c => `${c.name} ${formatTime(c.timestamp)}`).join('\n'));
+    setMelodyText((song.melody || []).map(m => `${m.string} ${m.fret} ${formatTime(m.timestamp)}`).join('\n'));
   };
 
   const handleSelectSong = (song: SongData) => {
@@ -109,13 +136,11 @@ export default function Home() {
 
   const handleSelectVideo = (video: VideoItem) => {
     setSelectedVideo(video);
-    // Check if this video already exists in our database (by videoId)
     const existing = BOLLYWOOD_SONGS.find(s => s.videoId === video.id.videoId) || getSongById(video.id.videoId);
     if (existing) {
       const latest = getSongById(existing.id) || existing;
       loadSongData(latest);
     } else {
-      // Create a new song entry with empty data
       const newSong: SongData = {
         id: video.id.videoId,
         title: video.snippet.title,
@@ -132,6 +157,8 @@ export default function Home() {
       setEditChords([]);
       setEditMelody([]);
       setEditLyrics('');
+      setChordsText('');
+      setMelodyText('');
     }
     setError('');
     setEditMode(false);
@@ -143,7 +170,56 @@ export default function Home() {
     setEditChords([...songData.chords]);
     setEditMelody([...songData.melody || []]);
     setEditLyrics(songData.lyrics || '');
+    setChordsText(songData.chords.map(c => `${c.name} ${formatTime(c.timestamp)}`).join('\n'));
+    setMelodyText((songData.melody || []).map(m => `${m.string} ${m.fret} ${formatTime(m.timestamp)}`).join('\n'));
     setEditMode(true);
+  };
+
+  const parseChordsText = (text: string): ChordEntry[] => {
+    const lines = text.split('\n');
+    const chords: ChordEntry[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const parts = trimmed.split(/\s+/);
+      if (parts.length >= 2) {
+        const name = parts.slice(0, -1).join(' '); // support chords like "C#m"
+        const timeStr = parts[parts.length - 1];
+        const timestamp = parseTimeToSeconds(timeStr);
+        chords.push({ name, timestamp });
+      }
+    }
+    return chords.sort((a, b) => a.timestamp - b.timestamp);
+  };
+
+  const parseMelodyText = (text: string): MelodyNote[] => {
+    const lines = text.split('\n');
+    const notes: MelodyNote[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const parts = trimmed.split(/\s+/);
+      if (parts.length >= 3) {
+        const string = parseInt(parts[0]);
+        const fret = parseInt(parts[1]);
+        const timeStr = parts[2];
+        const timestamp = parseTimeToSeconds(timeStr);
+        if (!isNaN(string) && !isNaN(fret) && string >= 1 && string <= 6) {
+          notes.push({ string, fret, timestamp });
+        }
+      }
+    }
+    return notes.sort((a, b) => a.timestamp - b.timestamp);
+  };
+
+  const applyChordsParse = () => {
+    const parsed = parseChordsText(chordsText);
+    setEditChords(parsed);
+  };
+
+  const applyMelodyParse = () => {
+    const parsed = parseMelodyText(melodyText);
+    setEditMelody(parsed);
   };
 
   const saveEdits = () => {
@@ -168,6 +244,7 @@ export default function Home() {
     }
   };
 
+  // Manual entry helpers (for advanced mode)
   const addEditChord = () => setEditChords([...editChords, { name: '', timestamp: 0 }]);
   const updateEditChord = (idx: number, field: 'name' | 'timestamp', value: string | number) => {
     const updated = [...editChords];
@@ -185,12 +262,6 @@ export default function Home() {
   };
   const removeEditMelody = (idx: number) => setEditMelody(editMelody.filter((_, i) => i !== idx));
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   const handleSearchLyrics = () => {
     if (!selectedVideo) return;
     const query = encodeURIComponent(`${selectedVideo.snippet.title} lyrics`);
@@ -201,25 +272,10 @@ export default function Home() {
     <div className="space-y-1 max-h-80 overflow-y-auto">
       {chords.map((chord, idx) => (
         <div key={idx} className="flex justify-between items-center p-3 bg-gray-700 rounded">
-          {editable ? (
-            <>
-              <input type="text" value={chord.name} onChange={(e) => updateEditChord(idx, 'name', e.target.value)} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Chord" />
-              <input type="number" value={chord.timestamp} onChange={(e) => updateEditChord(idx, 'timestamp', e.target.value)} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Time" step="0.1" />
-              <button onClick={() => removeEditChord(idx)} className="text-red-400"><Trash2 className="w-4 h-4" /></button>
-            </>
-          ) : (
-            <>
-              <span className="text-xl font-mono font-bold text-green-300">{chord.name}</span>
-              <span className="text-sm text-gray-300">{formatTime(chord.timestamp)}</span>
-            </>
-          )}
+          <span className="text-xl font-mono font-bold text-green-300">{chord.name}</span>
+          <span className="text-sm text-gray-300">{formatTime(chord.timestamp)}</span>
         </div>
       ))}
-      {editable && (
-        <button onClick={addEditChord} className="mt-2 text-sm text-green-400 flex items-center gap-1">
-          <Plus className="w-3 h-3" /> Add Chord
-        </button>
-      )}
     </div>
   );
 
@@ -228,30 +284,12 @@ export default function Home() {
       {melody.length > 0 ? (
         melody.map((note, idx) => (
           <div key={idx} className="flex justify-between items-center p-3 bg-gray-700 rounded">
-            {editable ? (
-              <>
-                <select value={note.string} onChange={(e) => updateEditMelody(idx, 'string', parseInt(e.target.value))} className="w-16 px-2 py-1 bg-gray-600 rounded">
-                  {[1,2,3,4,5,6].map(s => <option key={s} value={s}>{s}e</option>)}
-                </select>
-                <input type="number" value={note.fret} onChange={(e) => updateEditMelody(idx, 'fret', parseInt(e.target.value))} className="w-16 px-2 py-1 bg-gray-600 rounded" placeholder="Fret" />
-                <input type="number" value={note.timestamp} onChange={(e) => updateEditMelody(idx, 'timestamp', parseFloat(e.target.value))} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Time" step="0.1" />
-                <button onClick={() => removeEditMelody(idx)} className="text-red-400"><Trash2 className="w-4 h-4" /></button>
-              </>
-            ) : (
-              <>
-                <span className="text-lg font-mono">String {note.string}, Fret {note.fret}</span>
-                <span className="text-sm text-gray-300">{formatTime(note.timestamp)}</span>
-              </>
-            )}
+            <span className="text-lg font-mono">String {note.string}, Fret {note.fret}</span>
+            <span className="text-sm text-gray-300">{formatTime(note.timestamp)}</span>
           </div>
         ))
       ) : (
-        <p className="text-gray-400 text-center py-4">No melody notes yet. Edit to add some.</p>
-      )}
-      {editable && (
-        <button onClick={addEditMelody} className="mt-2 text-sm text-green-400 flex items-center gap-1">
-          <Plus className="w-3 h-3" /> Add Note
-        </button>
+        <p className="text-gray-400 text-center py-4">No melody notes yet.</p>
       )}
     </div>
   );
@@ -259,9 +297,14 @@ export default function Home() {
   const renderLyrics = (lyrics: string, editable: boolean) => (
     <div className="max-h-80 overflow-y-auto">
       {editable ? (
-        <textarea value={editLyrics} onChange={(e) => setEditLyrics(e.target.value)} className="w-full h-64 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white" placeholder="Paste lyrics here..." />
+        <textarea
+          value={editLyrics}
+          onChange={(e) => setEditLyrics(e.target.value)}
+          className="w-full h-64 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
+          placeholder="Paste lyrics here..."
+        />
       ) : (
-        <pre className="whitespace-pre-wrap font-sans text-gray-300">{lyrics || 'No lyrics yet. Edit to add or search online.'}</pre>
+        <pre className="whitespace-pre-wrap font-sans text-gray-300">{lyrics || 'No lyrics yet.'}</pre>
       )}
     </div>
   );
@@ -352,11 +395,92 @@ export default function Home() {
                 </div>
               </div>
 
-              {songData && (
+              {editMode && songData && (
                 <>
-                  {activeTab === 'chords' && renderChords(editMode ? editChords : songData.chords, editMode)}
-                  {activeTab === 'melody' && renderMelody(editMode ? editMelody : (songData.melody || []), editMode)}
-                  {activeTab === 'lyrics' && renderLyrics(editMode ? editLyrics : (songData.lyrics || ''), editMode)}
+                  {/* Free text area for chords */}
+                  {activeTab === 'chords' && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Paste chords (one per line: "Chord Time")</label>
+                        <textarea
+                          value={chordsText}
+                          onChange={(e) => setChordsText(e.target.value)}
+                          className="w-full h-40 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm"
+                          placeholder="C 0:00&#10;G 0:08&#10;Am 0:16"
+                        />
+                      </div>
+                      <button onClick={applyChordsParse} className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-sm flex items-center gap-1">
+                        <Wand2 className="w-4 h-4" /> Parse & Apply
+                      </button>
+                      <div className="flex items-center gap-2 mt-2">
+                        <button onClick={() => setShowAdvanced(!showAdvanced)} className="text-xs text-gray-400 hover:text-gray-300">
+                          {showAdvanced ? 'Hide' : 'Show'} advanced editing
+                        </button>
+                      </div>
+                      {showAdvanced && (
+                        <div className="border-t border-gray-700 pt-3 mt-2">
+                          <p className="text-xs text-gray-400 mb-2">Manual entry (advanced)</p>
+                          {editChords.map((chord, idx) => (
+                            <div key={idx} className="flex gap-2 items-center mb-2">
+                              <input type="text" value={chord.name} onChange={(e) => updateEditChord(idx, 'name', e.target.value)} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Chord" />
+                              <input type="number" value={chord.timestamp} onChange={(e) => updateEditChord(idx, 'timestamp', e.target.value)} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Time" step="0.1" />
+                              <button onClick={() => removeEditChord(idx)} className="text-red-400"><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          ))}
+                          <button onClick={addEditChord} className="text-sm text-green-400 flex items-center gap-1"><Plus className="w-3 h-3" /> Add Chord</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Free text area for melody */}
+                  {activeTab === 'melody' && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Paste melody notes (one per line: "String Fret Time")</label>
+                        <textarea
+                          value={melodyText}
+                          onChange={(e) => setMelodyText(e.target.value)}
+                          className="w-full h-40 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm"
+                          placeholder="2 1 0:00&#10;1 3 0:02&#10;2 3 0:04"
+                        />
+                      </div>
+                      <button onClick={applyMelodyParse} className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-sm flex items-center gap-1">
+                        <Wand2 className="w-4 h-4" /> Parse & Apply
+                      </button>
+                      <div className="flex items-center gap-2 mt-2">
+                        <button onClick={() => setShowAdvanced(!showAdvanced)} className="text-xs text-gray-400 hover:text-gray-300">
+                          {showAdvanced ? 'Hide' : 'Show'} advanced editing
+                        </button>
+                      </div>
+                      {showAdvanced && (
+                        <div className="border-t border-gray-700 pt-3 mt-2">
+                          <p className="text-xs text-gray-400 mb-2">Manual entry (advanced)</p>
+                          {editMelody.map((note, idx) => (
+                            <div key={idx} className="flex gap-2 items-center mb-2">
+                              <select value={note.string} onChange={(e) => updateEditMelody(idx, 'string', parseInt(e.target.value))} className="w-16 px-2 py-1 bg-gray-600 rounded">
+                                {[1,2,3,4,5,6].map(s => <option key={s} value={s}>{s}e</option>)}
+                              </select>
+                              <input type="number" value={note.fret} onChange={(e) => updateEditMelody(idx, 'fret', parseInt(e.target.value))} className="w-16 px-2 py-1 bg-gray-600 rounded" placeholder="Fret" />
+                              <input type="number" value={note.timestamp} onChange={(e) => updateEditMelody(idx, 'timestamp', parseFloat(e.target.value))} className="w-20 px-2 py-1 bg-gray-600 rounded" placeholder="Time" step="0.1" />
+                              <button onClick={() => removeEditMelody(idx)} className="text-red-400"><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          ))}
+                          <button onClick={addEditMelody} className="text-sm text-green-400 flex items-center gap-1"><Plus className="w-3 h-3" /> Add Note</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'lyrics' && renderLyrics(editLyrics, true)}
+                </>
+              )}
+
+              {!editMode && songData && (
+                <>
+                  {activeTab === 'chords' && renderChords(songData.chords, false)}
+                  {activeTab === 'melody' && renderMelody(songData.melody || [], false)}
+                  {activeTab === 'lyrics' && renderLyrics(songData.lyrics || '', false)}
                 </>
               )}
             </div>
