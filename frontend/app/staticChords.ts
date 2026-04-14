@@ -4,7 +4,7 @@ export interface ChordEntry {
 }
 
 export interface MelodyNote {
-  string: number; // 1=high E, 6=low E
+  string: number;
   fret: number;
   timestamp: number;
   duration?: number;
@@ -23,7 +23,7 @@ export interface SongData {
   lyrics?: string;
 }
 
-// Complete database with 100+ songs (sample shown)
+// Base Bollywood songs (sample – expand as needed)
 export const BOLLYWOOD_SONGS: SongData[] = [
   {
     id: '1',
@@ -45,49 +45,78 @@ export const BOLLYWOOD_SONGS: SongData[] = [
     ],
     lyrics: `Papa kehte hain bada naam karega...`,
   },
-  // ... add all 100 songs here (I'll provide a link to a full gist in the final message)
+  // ... add all other base songs here (I'll provide a full list separately)
 ];
 
-// Search and favorites functions
-export function findSongByTitle(title: string): SongData | null {
-  const lowerTitle = title.toLowerCase().replace(/[^\w\s]/g, '');
-  for (const song of BOLLYWOOD_SONGS) {
-    const allKeywordsPresent = song.keywords.every(kw => lowerTitle.includes(kw));
-    if (allKeywordsPresent) return song;
-  }
-  return null;
-}
+// Custom songs storage key
+const CUSTOM_SONGS_KEY = 'guitar_chord_finder_custom_songs';
 
-export function getAllSongs(): SongData[] {
-  return BOLLYWOOD_SONGS;
-}
-
-// LocalStorage management for custom songs
-const CUSTOM_SONGS_KEY = 'custom_songs';
-
+// Get all custom songs from localStorage
 export function getCustomSongs(): Record<string, SongData> {
   if (typeof window === 'undefined') return {};
-  const stored = localStorage.getItem(CUSTOM_SONGS_KEY);
-  return stored ? JSON.parse(stored) : {};
+  try {
+    const stored = localStorage.getItem(CUSTOM_SONGS_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
 }
 
+// Save a single custom song (merges with existing)
 export function saveCustomSong(song: SongData): void {
   const custom = getCustomSongs();
   custom[song.id] = song;
   localStorage.setItem(CUSTOM_SONGS_KEY, JSON.stringify(custom));
 }
 
-export function getSongWithCustom(id: string): SongData | null {
+// Delete a custom song (revert to base version)
+export function deleteCustomSong(songId: string): void {
+  const custom = getCustomSongs();
+  delete custom[songId];
+  localStorage.setItem(CUSTOM_SONGS_KEY, JSON.stringify(custom));
+}
+
+// Get a song by ID, preferring custom version over base
+export function getSongById(id: string): SongData | null {
   const custom = getCustomSongs();
   if (custom[id]) return custom[id];
   return BOLLYWOOD_SONGS.find(s => s.id === id) || null;
 }
 
-// Favorites
+// Get all songs (base + custom, with custom overriding base)
+export function getAllSongs(): SongData[] {
+  const custom = getCustomSongs();
+  const baseMap = new Map<string, SongData>();
+  BOLLYWOOD_SONGS.forEach(s => baseMap.set(s.id, s));
+  
+  // Override base with custom
+  Object.values(custom).forEach(c => baseMap.set(c.id, c));
+  
+  return Array.from(baseMap.values());
+}
+
+// Search by title (for matching YouTube videos)
+export function findSongByTitle(title: string): SongData | null {
+  const lowerTitle = title.toLowerCase().replace(/[^\w\s]/g, '');
+  const allSongs = getAllSongs();
+  for (const song of allSongs) {
+    const allKeywordsPresent = song.keywords.every(kw => lowerTitle.includes(kw));
+    if (allKeywordsPresent) return song;
+  }
+  return null;
+}
+
+// Favorites management
+const FAVORITES_KEY = 'guitar_chord_finder_favorites';
+
 export function getFavoriteIds(): string[] {
   if (typeof window === 'undefined') return [];
-  const stored = localStorage.getItem('favorite_songs');
-  return stored ? JSON.parse(stored) : [];
+  try {
+    const stored = localStorage.getItem(FAVORITES_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
 }
 
 export function toggleFavorite(songId: string): boolean {
@@ -98,7 +127,7 @@ export function toggleFavorite(songId: string): boolean {
   } else {
     favs.push(songId);
   }
-  localStorage.setItem('favorite_songs', JSON.stringify(favs));
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
   return index < 0;
 }
 
@@ -108,23 +137,22 @@ export function isFavorite(songId: string): boolean {
 
 export function getFavoriteSongs(): SongData[] {
   const favIds = getFavoriteIds();
-  return BOLLYWOOD_SONGS.filter(song => favIds.includes(song.id));
+  return getAllSongs().filter(s => favIds.includes(s.id));
 }
+
+// Export / Import
 export function exportDatabase(): string {
-  const custom = getCustomSongs();
-  const fullDB = BOLLYWOOD_SONGS.map(song => custom[song.id] || song);
-  return JSON.stringify(fullDB, null, 2);
+  const allSongs = getAllSongs();
+  return JSON.stringify(allSongs, null, 2);
 }
 
 export function importDatabase(jsonString: string): void {
   try {
     const imported = JSON.parse(jsonString) as SongData[];
-    const custom = getCustomSongs();
-    imported.forEach(song => {
-      custom[song.id] = song;
-    });
+    const custom: Record<string, SongData> = {};
+    imported.forEach(song => { custom[song.id] = song; });
     localStorage.setItem(CUSTOM_SONGS_KEY, JSON.stringify(custom));
   } catch (e) {
-    console.error('Invalid import file');
+    console.error('Invalid import file', e);
   }
 }
