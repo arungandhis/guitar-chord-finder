@@ -11,18 +11,15 @@ interface SettingsProps {
 
 export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [youtubeKey, setYoutubeKey] = useState('');
-  const [backendUrl, setBackendUrl] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       setYoutubeKey(localStorage.getItem('youtube_api_key') || '');
-      setBackendUrl(localStorage.getItem('transcribe_backend_url') || '');
     }
   }, [isOpen]);
 
   const saveSettings = () => {
     localStorage.setItem('youtube_api_key', youtubeKey.trim());
-    localStorage.setItem('transcribe_backend_url', backendUrl.trim());
     onClose();
     window.location.reload();
   };
@@ -78,22 +75,11 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             <a
               href="https://console.cloud.google.com/apis/credentials"
               target="_blank"
+              rel="noopener noreferrer"
               className="text-xs text-green-400 mt-1 inline-block"
             >
               Get a key →
             </a>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Transcription Backend URL</label>
-            <input
-              type="text"
-              value={backendUrl}
-              onChange={(e) => setBackendUrl(e.target.value)}
-              placeholder="https://your-backend.onrender.com"
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded"
-            />
-            <p className="text-xs text-gray-400 mt-1">URL of your Python backend (required for AI melody generation).</p>
           </div>
 
           <div className="border-t border-gray-700 pt-4">
