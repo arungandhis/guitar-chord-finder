@@ -4,7 +4,7 @@ export interface ChordEntry {
 }
 
 export interface MelodyNote {
-  string: number;
+  string: number; // 1 = high E, 6 = low E
   fret: number;
   timestamp: number;
   duration?: number;
@@ -23,7 +23,7 @@ export interface SongData {
   lyrics?: string;
 }
 
-// Base Bollywood songs (sample – expand as needed)
+// Base Bollywood songs (sample – you can expand this list)
 export const BOLLYWOOD_SONGS: SongData[] = [
   {
     id: '1',
@@ -43,15 +43,16 @@ export const BOLLYWOOD_SONGS: SongData[] = [
       { string: 1, fret: 3, timestamp: 2 },
       { string: 1, fret: 0, timestamp: 4 },
     ],
-    lyrics: `Papa kehte hain bada naam karega...`,
+    lyrics: `Papa kehte hain bada naam karega\nBeta hamara aisa kaam karega\nMagar yeh to na jaane ke manzil hai kahan`,
   },
-  // ... add all other base songs here (I'll provide a full list separately)
+  // Add more base songs as desired
 ];
 
-// Custom songs storage key
+// ==================== Local Storage Keys ====================
 const CUSTOM_SONGS_KEY = 'guitar_chord_finder_custom_songs';
+const FAVORITES_KEY = 'guitar_chord_finder_favorites';
 
-// Get all custom songs from localStorage
+// ==================== Custom Songs CRUD ====================
 export function getCustomSongs(): Record<string, SongData> {
   if (typeof window === 'undefined') return {};
   try {
@@ -62,40 +63,34 @@ export function getCustomSongs(): Record<string, SongData> {
   }
 }
 
-// Save a single custom song (merges with existing)
 export function saveCustomSong(song: SongData): void {
   const custom = getCustomSongs();
   custom[song.id] = song;
   localStorage.setItem(CUSTOM_SONGS_KEY, JSON.stringify(custom));
 }
 
-// Delete a custom song (revert to base version)
 export function deleteCustomSong(songId: string): void {
   const custom = getCustomSongs();
   delete custom[songId];
   localStorage.setItem(CUSTOM_SONGS_KEY, JSON.stringify(custom));
 }
 
-// Get a song by ID, preferring custom version over base
+// ==================== Song Retrieval ====================
 export function getSongById(id: string): SongData | null {
   const custom = getCustomSongs();
   if (custom[id]) return custom[id];
   return BOLLYWOOD_SONGS.find(s => s.id === id) || null;
 }
 
-// Get all songs (base + custom, with custom overriding base)
 export function getAllSongs(): SongData[] {
   const custom = getCustomSongs();
   const baseMap = new Map<string, SongData>();
   BOLLYWOOD_SONGS.forEach(s => baseMap.set(s.id, s));
-  
-  // Override base with custom
+  // Override with custom versions
   Object.values(custom).forEach(c => baseMap.set(c.id, c));
-  
   return Array.from(baseMap.values());
 }
 
-// Search by title (for matching YouTube videos)
 export function findSongByTitle(title: string): SongData | null {
   const lowerTitle = title.toLowerCase().replace(/[^\w\s]/g, '');
   const allSongs = getAllSongs();
@@ -106,9 +101,7 @@ export function findSongByTitle(title: string): SongData | null {
   return null;
 }
 
-// Favorites management
-const FAVORITES_KEY = 'guitar_chord_finder_favorites';
-
+// ==================== Favorites ====================
 export function getFavoriteIds(): string[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -140,7 +133,7 @@ export function getFavoriteSongs(): SongData[] {
   return getAllSongs().filter(s => favIds.includes(s.id));
 }
 
-// Export / Import
+// ==================== Export / Import ====================
 export function exportDatabase(): string {
   const allSongs = getAllSongs();
   return JSON.stringify(allSongs, null, 2);
@@ -154,5 +147,6 @@ export function importDatabase(jsonString: string): void {
     localStorage.setItem(CUSTOM_SONGS_KEY, JSON.stringify(custom));
   } catch (e) {
     console.error('Invalid import file', e);
+    alert('Failed to import database. Invalid file format.');
   }
 }
