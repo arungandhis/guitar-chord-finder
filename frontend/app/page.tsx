@@ -11,7 +11,7 @@ import {
 import Settings from './components/Settings';
 import {
   getAllSongs, SongData, ChordEntry, MelodyNote,
-  toggleFavorite, isFavorite, getFavoriteSongs, getSongWithCustom,
+  toggleFavorite, isFavorite, getFavoriteSongs, getSongById,
   saveCustomSong, BOLLYWOOD_SONGS,
 } from './staticChords';
 
@@ -92,7 +92,7 @@ export default function Home() {
 
   const handleSelectSong = (song: SongData) => {
     setBrowseOpen(false);
-    const customSong = getSongWithCustom(song.id) || song;
+    const customSong = getSongById(song.id) || song;
     setSelectedVideo({
       id: { videoId: customSong.videoId },
       snippet: {
@@ -109,11 +109,11 @@ export default function Home() {
 
   const handleSelectVideo = (video: VideoItem) => {
     setSelectedVideo(video);
-    // Check if this video matches any song in our database
-    const found = BOLLYWOOD_SONGS.find(s => s.videoId === video.id.videoId);
-    if (found) {
-      const customSong = getSongWithCustom(found.id) || found;
-      loadSongData(customSong);
+    // Check if this video already exists in our database (by videoId)
+    const existing = BOLLYWOOD_SONGS.find(s => s.videoId === video.id.videoId) || getSongById(video.id.videoId);
+    if (existing) {
+      const latest = getSongById(existing.id) || existing;
+      loadSongData(latest);
     } else {
       // Create a new song entry with empty data
       const newSong: SongData = {
@@ -122,7 +122,7 @@ export default function Home() {
         artist: video.snippet.channelTitle,
         year: new Date().getFullYear(),
         videoId: video.id.videoId,
-        keywords: [],
+        keywords: video.snippet.title.toLowerCase().split(/\s+/),
         displayName: video.snippet.title,
         chords: [],
         melody: [],
@@ -155,7 +155,7 @@ export default function Home() {
       lyrics: editLyrics,
     };
     saveCustomSong(updatedSong);
-    loadSongData(updatedSong);
+    setSongData(updatedSong);
     setEditMode(false);
   };
 
