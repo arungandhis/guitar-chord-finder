@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import YouTube from 'react-youtube';
 import {
   Search, Loader2, Music, ChevronLeft, Settings as SettingsIcon,
   AlertCircle, Plus, Save, X, List, Guitar, Star, Edit3, FileText,
-  ExternalLink, Trash2, Wand2, ClipboardPaste,
+  ExternalLink, Trash2, Wand2, ClipboardPaste, Play, Square,
 } from 'lucide-react';
 import Settings from './components/Settings';
 import {
@@ -24,7 +24,6 @@ interface VideoItem {
   };
 }
 
-// Helper: parse time string like "1:23" or "45.6" to seconds
 function parseTimeToSeconds(timeStr: string): number {
   timeStr = timeStr.trim();
   if (timeStr.includes(':')) {
@@ -36,20 +35,27 @@ function parseTimeToSeconds(timeStr: string): number {
   return parseFloat(timeStr) || 0;
 }
 
-// Helper: format seconds to MM:SS
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Map string name to number (1 = high e, 6 = low E)
 const stringNameToNumber: Record<string, number> = {
   'e': 1, 'E': 6,
   'B': 2, 'b': 2,
   'G': 3, 'g': 3,
   'D': 4, 'd': 4,
   'A': 5, 'a': 5,
+};
+
+const stringBaseFreq: Record<number, number> = {
+  1: 329.63,
+  2: 246.94,
+  3: 196.00,
+  4: 146.83,
+  5: 110.00,
+  6: 82.41,
 };
 
 export default function Home() {
@@ -71,21 +77,31 @@ export default function Home() {
   const [favorites, setFavorites] = useState<SongData[]>([]);
   const [activeTab, setActiveTab] = useState<'chords' | 'melody' | 'lyrics'>('chords');
 
-  // Free text edit states
   const [chordsText, setChordsText] = useState('');
   const [melodyText, setMelodyText] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Paste Tab modal
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [tabInput, setTabInput] = useState('');
   const [startTimeStr, setStartTimeStr] = useState('0:00');
   const [timePerNote, setTimePerNote] = useState('0.5');
 
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [tempo, setTempo] = useState(0.3); // seconds per note
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const stopPlaybackRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
     setHasKeys(!!yt);
     setFavorites(getFavoriteSongs());
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (stopPlaybackRef.current) stopPlaybackRef.current();
+      if (audioContextRef.current) audioContextRef.current.close();
+    };
   }, []);
 
   const refreshFavorites = () => setFavorites(getFavoriteSongs());
@@ -236,7 +252,6 @@ export default function Home() {
     setEditMelody(parsed);
   };
 
-  // Paste Tab parser
   const parseTabInput = () => {
     const lines = tabInput.split('\n');
     const newNotes: MelodyNote[] = [];
@@ -246,14 +261,12 @@ export default function Home() {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      // Expect format like "B|--0--0--2--0--5--4--"
       const match = trimmed.match(/^([eEaAdDgGbB])\|(.*)$/);
       if (!match) continue;
       const stringChar = match[1];
       const stringNum = stringNameToNumber[stringChar];
       if (!stringNum) continue;
       const tabContent = match[2];
-      // Extract numbers (fret values) from the tab content
       const fretMatches = tabContent.match(/\d+/g);
       if (!fretMatches) continue;
       let currentTime = startTime;
@@ -270,11 +283,9 @@ export default function Home() {
       }
     }
     if (newNotes.length > 0) {
-      setEditMelody(prev => [...prev, ...newNotes].sort((a, b) => a.timestamp - b.timestamp));
-      setMelodyText(prev => {
-        const combined = [...editMelody, ...newNotes].sort((a, b) => a.timestamp - b.timestamp);
-        return combined.map(m => `${m.string} ${m.fret} ${formatTime(m.timestamp)}`).join('\n');
-      });
+      const combined = [...editMelody, ...newNotes].sort((a, b) => a.timestamp - b.timestamp);
+      setEditMelody(combined);
+      setMelodyText(combined.map(m => `${m.string} ${m.fret} ${formatTime(m.timestamp)}`).join('\n'));
     }
     setPasteModalOpen(false);
     setTabInput('');
@@ -302,6 +313,86 @@ export default function Home() {
     }
   };
 
+  // ---- Audio Playback (Sequential, ignoring timestamps) ----
+  const playMelody = (notes: MelodyNote[]) => {
+    if (notes.length === 0) {
+      alert('No melody notes to play.');
+      return;
+    }
+
+    // Stop any ongoing playback
+    if (stopPlaybackRef.current) {
+      stopPlaybackRef.current();
+    }
+
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    audioContextRef.current = ctx;
+
+    let isStopped = false;
+    const stop = () => {
+      isStopped = true;
+      if (ctx.state !== 'closed') ctx.close();
+      setIsPlaying(false);
+      stopPlaybackRef.current = null;
+    };
+    stopPlaybackRef.current = stop;
+
+    const now = ctx.currentTime;
+    let timeOffset = 0;
+
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i];
+      const freq = stringBaseFreq[note.string] * Math.pow(2, note.fret / 12);
+      const startTime = now + timeOffset;
+      const duration = tempo * 0.8; // note length
+
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.3, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+
+      timeOffset += tempo;
+    }
+
+    setIsPlaying(true);
+    // Auto-stop after last note
+    setTimeout(() => {
+      if (stopPlaybackRef.current === stop) {
+        stop();
+      }
+    }, (notes.length * tempo * 1000) + 500);
+  };
+
+  const handlePlayMelody = () => {
+    if (!songData || !songData.melody) return;
+    playMelody(songData.melody);
+  };
+
+  const handlePlayPreview = () => {
+    if (editMelody.length === 0) {
+      alert('No notes to preview.');
+      return;
+    }
+    playMelody(editMelody);
+  };
+
+  const handleStopPlayback = () => {
+    if (stopPlaybackRef.current) {
+      stopPlaybackRef.current();
+    }
+    setIsPlaying(false);
+  };
+
+  // Manual entry helpers
   const addEditChord = () => setEditChords([...editChords, { name: '', timestamp: 0 }]);
   const updateEditChord = (idx: number, field: 'name' | 'timestamp', value: string | number) => {
     const updated = [...editChords];
@@ -325,7 +416,7 @@ export default function Home() {
     window.open(`https://www.google.com/search?q=${query}`, '_blank');
   };
 
-  const renderChords = (chords: ChordEntry[], editable: boolean) => (
+  const renderChords = (chords: ChordEntry[]) => (
     <div className="space-y-1 max-h-80 overflow-y-auto">
       {chords.map((chord, idx) => (
         <div key={idx} className="flex justify-between items-center p-3 bg-gray-700 rounded">
@@ -336,7 +427,7 @@ export default function Home() {
     </div>
   );
 
-  const renderMelody = (melody: MelodyNote[], editable: boolean) => (
+  const renderMelody = (melody: MelodyNote[]) => (
     <div className="space-y-1 max-h-80 overflow-y-auto">
       {melody.length > 0 ? (
         melody.map((note, idx) => (
@@ -439,6 +530,32 @@ export default function Home() {
                       <ExternalLink className="w-4 h-4" /> Search Lyrics
                     </button>
                   )}
+                  {activeTab === 'melody' && !editMode && songData?.melody && songData.melody.length > 0 && (
+                    <>
+                      {isPlaying ? (
+                        <button onClick={handleStopPlayback} className="text-sm bg-red-600 hover:bg-red-700 px-3 py-1 rounded flex items-center gap-1">
+                          <Square className="w-4 h-4" /> Stop
+                        </button>
+                      ) : (
+                        <button onClick={handlePlayMelody} className="text-sm bg-green-600 hover:bg-green-700 px-3 py-1 rounded flex items-center gap-1">
+                          <Play className="w-4 h-4" /> Play Melody
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {activeTab === 'melody' && editMode && editMelody.length > 0 && (
+                    <>
+                      {isPlaying ? (
+                        <button onClick={handleStopPlayback} className="text-sm bg-red-600 hover:bg-red-700 px-3 py-1 rounded flex items-center gap-1">
+                          <Square className="w-4 h-4" /> Stop
+                        </button>
+                      ) : (
+                        <button onClick={handlePlayPreview} className="text-sm bg-green-600 hover:bg-green-700 px-3 py-1 rounded flex items-center gap-1">
+                          <Play className="w-4 h-4" /> Preview
+                        </button>
+                      )}
+                    </>
+                  )}
                   {songData && (
                     !editMode ? (
                       <button onClick={enterEditMode} className="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded flex items-center gap-1"><Edit3 className="w-4 h-4" /> Edit</button>
@@ -451,6 +568,23 @@ export default function Home() {
                   )}
                 </div>
               </div>
+
+              {/* Tempo slider (only when melody tab active) */}
+              {activeTab === 'melody' && (songData?.melody?.length > 0 || editMelody.length > 0) && (
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="text-xs text-gray-400">Tempo:</span>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={tempo}
+                    onChange={(e) => setTempo(parseFloat(e.target.value))}
+                    className="w-32"
+                  />
+                  <span className="text-xs text-gray-400">{tempo.toFixed(2)}s/note</span>
+                </div>
+              )}
 
               {editMode && songData && (
                 <>
@@ -539,8 +673,8 @@ export default function Home() {
 
               {!editMode && songData && (
                 <>
-                  {activeTab === 'chords' && renderChords(songData.chords, false)}
-                  {activeTab === 'melody' && renderMelody(songData.melody || [], false)}
+                  {activeTab === 'chords' && renderChords(songData.chords)}
+                  {activeTab === 'melody' && renderMelody(songData.melody || [])}
                   {activeTab === 'lyrics' && renderLyrics(songData.lyrics || '', false)}
                 </>
               )}
