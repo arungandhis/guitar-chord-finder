@@ -6,7 +6,7 @@ import YouTube from 'react-youtube';
 import {
   Search, Loader2, Music, ChevronLeft, Settings as SettingsIcon,
   AlertCircle, Plus, Save, X, List, Guitar, Star, Edit3, FileText,
-  ExternalLink, Trash2, Wand2, ClipboardPaste, Play, Square,
+  ExternalLink, Trash2, Wand2, ClipboardPaste, Play, Square, Camera,
 } from 'lucide-react';
 import Settings from './components/Settings';
 import {
@@ -14,6 +14,8 @@ import {
   toggleFavorite, isFavorite, getFavoriteSongs, getSongById,
   saveCustomSong, BOLLYWOOD_SONGS,
 } from './staticChords';
+import Tesseract from 'tesseract.js';
+import { Tablature } from 'tablature-parser';
 
 interface VideoItem {
   id: { videoId: string };
@@ -90,6 +92,9 @@ export default function Home() {
   const [tempo, setTempo] = useState(0.3);
   const audioContextRef = useRef<AudioContext | null>(null);
   const stopPlaybackRef = useRef<(() => void) | null>(null);
+
+  const [isScanning, setIsScanning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
@@ -291,6 +296,38 @@ export default function Home() {
     setTabInput('');
   };
 
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsScanning(true);
+    try {
+      const { data: { text } } = await Tesseract.recognize(file, 'eng');
+      const notes = Tablature.parse(text);
+
+      const scannedMelody: MelodyNote[] = [];
+      notes.forEach((row: any) => {
+        row.forEach((note: any) => {
+          scannedMelody.push({
+            string: note.s + 1,
+            fret: note.f,
+            timestamp: editMelody.length + scannedMelody.length * 0.5,
+          });
+        });
+      });
+
+      const combined = [...editMelody, ...scannedMelody].sort((a, b) => a.timestamp - b.timestamp);
+      setEditMelody(combined);
+      setMelodyText(combined.map(m => `${m.string} ${m.fret} ${formatTime(m.timestamp)}`).join('\n'));
+    } catch (error) {
+      console.error('OCR or parsing failed:', error);
+      alert('Could not read a guitar tab from the image. Make sure the photo is clear.');
+    } finally {
+      setIsScanning(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   const saveEdits = () => {
     if (!songData) return;
     const updatedSong: SongData = {
@@ -326,7 +363,6 @@ export default function Home() {
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     audioContextRef.current = ctx;
 
-    // iOS requires the context to be resumed after creation
     if (ctx.state === 'suspended') {
       await ctx.resume();
     }
@@ -570,7 +606,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Tempo slider */}
               {activeTab === 'melody' && ((songData?.melody?.length ?? 0) > 0 || editMelody.length > 0) && (
                 <div className="mb-4 flex items-center gap-3">
                   <span className="text-xs text-gray-400">Tempo:</span>
@@ -628,12 +663,30 @@ export default function Home() {
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
                         <label className="block text-sm font-medium">Melody notes (format: "String Fret Time")</label>
-                        <button
-                          onClick={() => setPasteModalOpen(true)}
-                          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-sm flex items-center gap-1"
-                        >
-                          <ClipboardPaste className="w-4 h-4" /> Paste Tab
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setPasteModalOpen(true)}
+                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-sm flex items-center gap-1"
+                          >
+                            <ClipboardPaste className="w-4 h-4" /> Paste Tab
+                          </button>
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isScanning}
+                            className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Camera className="w-4 h-4" />
+                            {isScanning ? 'Scanning...' : 'Scan Melody'}
+                          </button>
+                          <input
+                            type="file"
+                            ref={fileInputRef}
+                            onChange={handleImageUpload}
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                          />
+                        </div>
                       </div>
                       <textarea
                         value={melodyText}
@@ -683,7 +736,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Paste Tab Modal */}
         {pasteModalOpen && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
             <div className="bg-gray-800 rounded-lg w-full max-w-lg p-6">
