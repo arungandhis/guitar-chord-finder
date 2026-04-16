@@ -87,7 +87,7 @@ export default function Home() {
   const [timePerNote, setTimePerNote] = useState('0.5');
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [tempo, setTempo] = useState(0.3); // seconds per note
+  const [tempo, setTempo] = useState(0.3);
   const audioContextRef = useRef<AudioContext | null>(null);
   const stopPlaybackRef = useRef<(() => void) | null>(null);
 
@@ -313,14 +313,12 @@ export default function Home() {
     }
   };
 
-  // ---- Audio Playback (Sequential, ignoring timestamps) ----
   const playMelody = (notes: MelodyNote[]) => {
     if (notes.length === 0) {
       alert('No melody notes to play.');
       return;
     }
 
-    // Stop any ongoing playback
     if (stopPlaybackRef.current) {
       stopPlaybackRef.current();
     }
@@ -344,7 +342,7 @@ export default function Home() {
       const note = notes[i];
       const freq = stringBaseFreq[note.string] * Math.pow(2, note.fret / 12);
       const startTime = now + timeOffset;
-      const duration = tempo * 0.8; // note length
+      const duration = tempo * 0.8;
 
       const osc = ctx.createOscillator();
       osc.type = 'triangle';
@@ -364,12 +362,11 @@ export default function Home() {
     }
 
     setIsPlaying(true);
-    // Auto-stop after last note
     setTimeout(() => {
       if (stopPlaybackRef.current === stop) {
         stop();
       }
-    }, (notes.length * tempo * 1000) + 500);
+    }, notes.length * tempo * 1000 + 500);
   };
 
   const handlePlayMelody = () => {
@@ -392,7 +389,6 @@ export default function Home() {
     setIsPlaying(false);
   };
 
-  // Manual entry helpers
   const addEditChord = () => setEditChords([...editChords, { name: '', timestamp: 0 }]);
   const updateEditChord = (idx: number, field: 'name' | 'timestamp', value: string | number) => {
     const updated = [...editChords];
@@ -570,7 +566,7 @@ export default function Home() {
               </div>
 
               {/* Tempo slider (only when melody tab active) */}
-              {activeTab === 'melody' && (songData?.melody?.length > 0 || editMelody.length > 0) && (
+              {activeTab === 'melody' && ((songData?.melody?.length ?? 0) > 0 || editMelody.length > 0) && (
                 <div className="mb-4 flex items-center gap-3">
                   <span className="text-xs text-gray-400">Tempo:</span>
                   <input
