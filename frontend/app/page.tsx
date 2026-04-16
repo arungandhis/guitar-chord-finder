@@ -313,7 +313,7 @@ export default function Home() {
     }
   };
 
-  const playMelody = (notes: MelodyNote[]) => {
+  const playMelody = async (notes: MelodyNote[]) => {
     if (notes.length === 0) {
       alert('No melody notes to play.');
       return;
@@ -325,6 +325,11 @@ export default function Home() {
 
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     audioContextRef.current = ctx;
+
+    // iOS requires the context to be resumed after creation
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
 
     let isStopped = false;
     const stop = () => {
@@ -565,7 +570,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Tempo slider (only when melody tab active) */}
+              {/* Tempo slider */}
               {activeTab === 'melody' && ((songData?.melody?.length ?? 0) > 0 || editMelody.length > 0) && (
                 <div className="mb-4 flex items-center gap-3">
                   <span className="text-xs text-gray-400">Tempo:</span>
