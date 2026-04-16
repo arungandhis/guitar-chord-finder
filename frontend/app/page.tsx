@@ -15,7 +15,6 @@ import {
   saveCustomSong, BOLLYWOOD_SONGS,
 } from './staticChords';
 import Tesseract from 'tesseract.js';
-import { Tablature } from 'tablature-parser';
 
 interface VideoItem {
   id: { videoId: string };
@@ -304,69 +303,42 @@ export default function Home() {
     try {
       const { data: { text } } = await Tesseract.recognize(file, 'eng');
       
-      let parsedNotes;
-      try {
-        // Try using tablature-parser
-        parsedNotes = Tablature.parse(text);
-      } catch (parseError) {
-        // Fallback: simple extraction of numbers from lines like "B|--0--2--"
-        console.warn('tablature-parser failed, using fallback');
-        const lines = text.split('\n');
-        const fallbackNotes: MelodyNote[] = [];
-        lines.forEach(line => {
-          const match = line.match(/^([eEaAdDgGbB])\|(.*)$/);
-          if (match) {
-            const stringChar = match[1];
-            const stringNum = stringNameToNumber[stringChar];
-            if (stringNum) {
-              const fretMatches = match[2].match(/\d+/g);
-              if (fretMatches) {
-                fretMatches.forEach(fretStr => {
-                  const fret = parseInt(fretStr);
-                  if (!isNaN(fret)) {
-                    fallbackNotes.push({
-                      string: stringNum,
-                      fret,
-                      timestamp: editMelody.length + fallbackNotes.length * 0.5,
-                    });
-                  }
-                });
-              }
+      const lines = text.split('\n');
+      const scannedMelody: MelodyNote[] = [];
+      
+      lines.forEach(line => {
+        const match = line.match(/^([eEaAdDgGbB])\|(.*)$/);
+        if (match) {
+          const stringChar = match[1];
+          const stringNum = stringNameToNumber[stringChar];
+          if (stringNum) {
+            const fretMatches = match[2].match(/\d+/g);
+            if (fretMatches) {
+              fretMatches.forEach(fretStr => {
+                const fret = parseInt(fretStr);
+                if (!isNaN(fret)) {
+                  scannedMelody.push({
+                    string: stringNum,
+                    fret,
+                    timestamp: editMelody.length + scannedMelody.length * 0.5,
+                  });
+                }
+              });
             }
           }
-        });
-        parsedNotes = fallbackNotes;
-      }
-
-      const scannedMelody: MelodyNote[] = [];
-      if (Array.isArray(parsedNotes)) {
-        parsedNotes.forEach((item: any) => {
-          if (Array.isArray(item)) {
-            // Output from tablature-parser (array of rows)
-            item.forEach((note: any) => {
-              scannedMelody.push({
-                string: note.s + 1,
-                fret: note.f,
-                timestamp: editMelody.length + scannedMelody.length * 0.5,
-              });
-            });
-          } else if (item.string !== undefined) {
-            // Already in our format from fallback
-            scannedMelody.push(item);
-          }
-        });
-      }
+        }
+      });
 
       if (scannedMelody.length > 0) {
         const combined = [...editMelody, ...scannedMelody].sort((a, b) => a.timestamp - b.timestamp);
         setEditMelody(combined);
         setMelodyText(combined.map(m => `${m.string} ${m.fret} ${formatTime(m.timestamp)}`).join('\n'));
       } else {
-        alert('No tablature found in the image.');
+        alert('No tablature found in the image. Make sure the photo shows standard tab lines like B|--0--2--');
       }
     } catch (error) {
-      console.error('OCR or parsing failed:', error);
-      alert('Could not read a guitar tab from the image. Make sure the photo is clear.');
+      console.error('OCR failed:', error);
+      alert('Could not read text from the image. Please try a clearer photo.');
     } finally {
       setIsScanning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
