@@ -6,7 +6,7 @@ import YouTube from 'react-youtube';
 import {
   Search, Loader2, Music, ChevronLeft, Settings as SettingsIcon,
   AlertCircle, Plus, Save, X, List, Guitar, Star, Edit3, FileText,
-  ExternalLink, Trash2, Wand2,
+  ExternalLink, Trash2, Wand2, ClipboardPaste,
 } from 'lucide-react';
 import Settings from './components/Settings';
 import {
@@ -43,6 +43,15 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+// Map string name to number (1 = high e, 6 = low E)
+const stringNameToNumber: Record<string, number> = {
+  'e': 1, 'E': 6,
+  'B': 2, 'b': 2,
+  'G': 3, 'g': 3,
+  'D': 4, 'd': 4,
+  'A': 5, 'a': 5,
+};
+
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [videos, setVideos] = useState<VideoItem[]>([]);
@@ -61,11 +70,17 @@ export default function Home() {
   const [allSongs] = useState(() => getAllSongs());
   const [favorites, setFavorites] = useState<SongData[]>([]);
   const [activeTab, setActiveTab] = useState<'chords' | 'melody' | 'lyrics'>('chords');
-  
+
   // Free text edit states
   const [chordsText, setChordsText] = useState('');
   const [melodyText, setMelodyText] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Paste Tab modal
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
+  const [tabInput, setTabInput] = useState('');
+  const [startTimeStr, setStartTimeStr] = useState('0:00');
+  const [timePerNote, setTimePerNote] = useState('0.5');
 
   useEffect(() => {
     const yt = localStorage.getItem('youtube_api_key');
@@ -112,7 +127,6 @@ export default function Home() {
     setEditChords(song.chords);
     setEditMelody(song.melody || []);
     setEditLyrics(song.lyrics || '');
-    // Generate free text representations
     setChordsText(song.chords.map(c => `${c.name} ${formatTime(c.timestamp)}`).join('\n'));
     setMelodyText((song.melody || []).map(m => `${m.string} ${m.fret} ${formatTime(m.timestamp)}`).join('\n'));
   };
@@ -183,7 +197,7 @@ export default function Home() {
       if (!trimmed || trimmed.startsWith('#')) continue;
       const parts = trimmed.split(/\s+/);
       if (parts.length >= 2) {
-        const name = parts.slice(0, -1).join(' '); // support chords like "C#m"
+        const name = parts.slice(0, -1).join(' ');
         const timeStr = parts[parts.length - 1];
         const timestamp = parseTimeToSeconds(timeStr);
         chords.push({ name, timestamp });
@@ -222,6 +236,50 @@ export default function Home() {
     setEditMelody(parsed);
   };
 
+  // Paste Tab parser
+  const parseTabInput = () => {
+    const lines = tabInput.split('\n');
+    const newNotes: MelodyNote[] = [];
+    const startTime = parseTimeToSeconds(startTimeStr);
+    const interval = parseFloat(timePerNote) || 0.5;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      // Expect format like "B|--0--0--2--0--5--4--"
+      const match = trimmed.match(/^([eEaAdDgGbB])\|(.*)$/);
+      if (!match) continue;
+      const stringChar = match[1];
+      const stringNum = stringNameToNumber[stringChar];
+      if (!stringNum) continue;
+      const tabContent = match[2];
+      // Extract numbers (fret values) from the tab content
+      const fretMatches = tabContent.match(/\d+/g);
+      if (!fretMatches) continue;
+      let currentTime = startTime;
+      for (const fretStr of fretMatches) {
+        const fret = parseInt(fretStr);
+        if (!isNaN(fret)) {
+          newNotes.push({
+            string: stringNum,
+            fret,
+            timestamp: currentTime,
+          });
+          currentTime += interval;
+        }
+      }
+    }
+    if (newNotes.length > 0) {
+      setEditMelody(prev => [...prev, ...newNotes].sort((a, b) => a.timestamp - b.timestamp));
+      setMelodyText(prev => {
+        const combined = [...editMelody, ...newNotes].sort((a, b) => a.timestamp - b.timestamp);
+        return combined.map(m => `${m.string} ${m.fret} ${formatTime(m.timestamp)}`).join('\n');
+      });
+    }
+    setPasteModalOpen(false);
+    setTabInput('');
+  };
+
   const saveEdits = () => {
     if (!songData) return;
     const updatedSong: SongData = {
@@ -244,7 +302,6 @@ export default function Home() {
     }
   };
 
-  // Manual entry helpers (for advanced mode)
   const addEditChord = () => setEditChords([...editChords, { name: '', timestamp: 0 }]);
   const updateEditChord = (idx: number, field: 'name' | 'timestamp', value: string | number) => {
     const updated = [...editChords];
@@ -397,7 +454,6 @@ export default function Home() {
 
               {editMode && songData && (
                 <>
-                  {/* Free text area for chords */}
                   {activeTab === 'chords' && (
                     <div className="space-y-3">
                       <div>
@@ -433,20 +489,25 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Free text area for melody */}
                   {activeTab === 'melody' && (
                     <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Paste melody notes (one per line: "String Fret Time")</label>
-                        <textarea
-                          value={melodyText}
-                          onChange={(e) => setMelodyText(e.target.value)}
-                          className="w-full h-40 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm"
-                          placeholder="2 1 0:00&#10;1 3 0:02&#10;2 3 0:04"
-                        />
+                      <div className="flex justify-between items-center">
+                        <label className="block text-sm font-medium">Melody notes (format: "String Fret Time")</label>
+                        <button
+                          onClick={() => setPasteModalOpen(true)}
+                          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-sm flex items-center gap-1"
+                        >
+                          <ClipboardPaste className="w-4 h-4" /> Paste Tab
+                        </button>
                       </div>
+                      <textarea
+                        value={melodyText}
+                        onChange={(e) => setMelodyText(e.target.value)}
+                        className="w-full h-40 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm"
+                        placeholder="2 1 0:00&#10;1 3 0:02&#10;2 3 0:04"
+                      />
                       <button onClick={applyMelodyParse} className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-sm flex items-center gap-1">
-                        <Wand2 className="w-4 h-4" /> Parse & Apply
+                        <Wand2 className="w-4 h-4" /> Parse Text
                       </button>
                       <div className="flex items-center gap-2 mt-2">
                         <button onClick={() => setShowAdvanced(!showAdvanced)} className="text-xs text-gray-400 hover:text-gray-300">
@@ -483,6 +544,58 @@ export default function Home() {
                   {activeTab === 'lyrics' && renderLyrics(songData.lyrics || '', false)}
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Paste Tab Modal */}
+        {pasteModalOpen && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg w-full max-w-lg p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold">Paste Guitar Tab</h3>
+                <button onClick={() => setPasteModalOpen(false)} className="p-1 hover:bg-gray-700 rounded"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Tab lines (e.g., B|--0--0--2--)</label>
+                  <textarea
+                    value={tabInput}
+                    onChange={(e) => setTabInput(e.target.value)}
+                    className="w-full h-32 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white font-mono text-sm"
+                    placeholder="e|--3--5--7--&#10;B|--0--0--2--"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Start time (MM:SS or seconds)</label>
+                    <input
+                      type="text"
+                      value={startTimeStr}
+                      onChange={(e) => setStartTimeStr(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded"
+                      placeholder="0:00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Seconds per note</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={timePerNote}
+                      onChange={(e) => setTimePerNote(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded"
+                      placeholder="0.5"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-6">
+                <button onClick={() => setPasteModalOpen(false)} className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded">Cancel</button>
+                <button onClick={parseTabInput} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded flex items-center gap-1">
+                  <Wand2 className="w-4 h-4" /> Parse & Apply
+                </button>
+              </div>
             </div>
           </div>
         )}
